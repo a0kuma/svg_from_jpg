@@ -25,8 +25,9 @@
          font-size:12px; background:rgba(15,18,22,.6); padding:3px 8px; border-radius:6px;
          pointer-events:none; }
   .wrap { position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform; }
-  .wrap svg { display:block; position:absolute; top:0; left:0; }
-  .wrap canvas { position:absolute; top:0; left:0; }
+  .wrap svg { display:block; position:absolute; top:0; left:0; z-index:0; }
+  .wrap canvas { position:absolute; top:0; left:0; z-index:2; }
+  .vshade { position:absolute; top:0; height:100%; display:none; pointer-events:none; z-index:1; }
   #cv { cursor:crosshair; }
   .side.panning, .side.panning #cv { cursor:grabbing; }
   #right .wrap { background:#0b0e12; box-shadow:inset 0 0 0 1px var(--line); }
@@ -48,6 +49,7 @@
   <button class="btn" id="fit">重設視圖</button>
   <button class="btn" id="clrpt">清除點</button>
   <button class="btn" id="clrcp">清空右側</button>
+  <button class="btn" id="shade">套用垂直色帶</button>
   <div class="hint" id="xpos">x: --%</div>
   <span class="sp"></span>
   <span class="hint">左圖點一下 → 該 x 位置上所有色塊(整條垂直帶)複製到右側 · 拖曳平移 · 滾輪縮放(左右同步)</span>
@@ -58,6 +60,7 @@
     <div class="tag">原始 SVG(可點選)</div>
     <div class="wrap" id="lwrap">
       <div id="host"></div>
+      <div id="lshade" class="vshade"></div>
       <canvas id="cv"></canvas>
     </div>
   </div>
@@ -65,6 +68,7 @@
     <div class="tag">已複製的色塊</div>
     <div class="wrap" id="rwrap">
       <svg id="rsvg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="rshade" class="vshade"></div>
     </div>
   </div>
   <div id="drop">拖放或<b>&nbsp;上傳 SVG&nbsp;</b>開始</div>
@@ -72,6 +76,7 @@
 
 <div id="flyer"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -80,7 +85,7 @@ const dpr = Math.max(1, window.devicePixelRatio || 1);
 const left = $("left"), right = $("right"), stage = $("stage");
 const lwrap = $("lwrap"), rwrap = $("rwrap"), host = $("host"), rsvg = $("rsvg");
 const cv = $("cv"), ctx = cv.getContext("2d"), flyer = $("flyer");
-const xpos = $("xpos");
+const xpos = $("xpos"), lshade = $("lshade"), rshade = $("rshade");
 
 let lsvg = null;                 // parsed source <svg>
 let vbW = 0, vbH = 0;            // viewBox size (user units)
@@ -95,6 +100,27 @@ function setXPercent(localX) {
   if (!baseW || !Number.isFinite(localX)) { xpos.textContent = "x: --%"; return; }
   const pct = Math.max(0, Math.min(100, (localX / baseW) * 100));
   xpos.textContent = `x: ${pct.toFixed(2)}%`;
+}
+
+function hexToRgb(hex) {
+  const n = hex.replace("#", "");
+  return { r: parseInt(n.slice(0, 2), 16), g: parseInt(n.slice(2, 4), 16), b: parseInt(n.slice(4, 6), 16) };
+}
+function clearShade() {
+  for (const sh of [lshade, rshade]) { sh.style.display = "none"; sh.style.width = "0"; }
+}
+function applyShade(startPct, endPct, hex, alpha) {
+  const from = Math.max(0, Math.min(100, Math.min(startPct, endPct)));
+  const to = Math.max(0, Math.min(100, Math.max(startPct, endPct)));
+  const a = Math.max(0, Math.min(1, alpha));
+  const { r, g, b } = hexToRgb(hex);
+  const rgba = `rgba(${r}, ${g}, ${b}, ${a})`;
+  for (const sh of [lshade, rshade]) {
+    sh.style.left = `${from}%`;
+    sh.style.width = `${to - from}%`;
+    sh.style.background = rgba;
+    sh.style.display = "block";
+  }
 }
 
 /* ---- load ---- */
@@ -119,6 +145,7 @@ function loadSvgText(text) {
   rsvg.setAttribute("viewBox", vb);
 
   pts = []; copied.clear();
+  clearShade();
   setXPercent(NaN);
   stage.classList.add("loaded"); $("drop").style.display = "none";
   fitView();
@@ -265,6 +292,34 @@ $("fin").addEventListener("change", e => { const f = e.target.files[0]; if (f) f
 $("fit").onclick = fitView;
 $("clrpt").onclick = () => { pts = []; redraw(); };
 $("clrcp").onclick = () => { rsvg.innerHTML = ""; copied.clear(); };
+$("shade").onclick = async () => {
+  if (!lsvg) { Swal.fire("請先載入 SVG"); return; }
+  const result = await Swal.fire({
+    title: "套用垂直色帶",
+    html: `
+      <input id="sw-start" class="swal2-input" type="number" min="0" max="100" step="0.01" placeholder="起點 X (%)">
+      <input id="sw-end" class="swal2-input" type="number" min="0" max="100" step="0.01" placeholder="終點 X (%)">
+      <div style="display:flex;gap:8px;align-items:center;justify-content:center;padding:0 1.25em 0.75em;">
+        <input id="sw-color" type="color" value="#4dd0e1" style="width:100%;max-width:120px;height:40px;border:0;padding:0;background:none;">
+        <input id="sw-alpha" class="swal2-input" type="number" min="0" max="1" step="0.01" value="0.35" placeholder="Alpha 0~1" style="margin:0;max-width:120px;">
+      </div>`,
+    focusConfirm: false,
+    showCancelButton: true,
+    confirmButtonText: "套用",
+    cancelButtonText: "取消",
+    preConfirm: () => {
+      const start = Number($("sw-start").value);
+      const end = Number($("sw-end").value);
+      const color = $("sw-color").value || "#4dd0e1";
+      const alpha = Number($("sw-alpha").value);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) { Swal.showValidationMessage("請輸入有效的起點/終點百分比"); return; }
+      if (start < 0 || start > 100 || end < 0 || end > 100) { Swal.showValidationMessage("X 百分比必須在 0~100"); return; }
+      if (!Number.isFinite(alpha) || alpha < 0 || alpha > 1) { Swal.showValidationMessage("Alpha 必須在 0~1"); return; }
+      return { start, end, color, alpha };
+    }
+  });
+  if (result.isConfirmed) applyShade(result.value.start, result.value.end, result.value.color, result.value.alpha);
+};
 ["dragover", "dragenter"].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); stage.classList.add("dragover"); }));
 ["dragleave", "drop"].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); if (t === "dragleave" && e.target !== stage) return; stage.classList.remove("dragover"); }));
 stage.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) f.text().then(loadSvgText); });
