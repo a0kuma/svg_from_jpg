@@ -24,7 +24,7 @@ from PIL import Image
 import ers
 import svgize
 
-HOST, PORT = "0.0.0.0", 48489
+HOST, PORT = "0.0.0.0", int(os.environ.get("PORT", "48489"))
 MAX_UPLOAD = 40 * 1024 * 1024        # 40 MB
 MAXDIM_CAP = 400                     # hard cap on segmentation resolution
 EDITOR_JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "editor.js")

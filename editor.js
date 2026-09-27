@@ -197,6 +197,57 @@
       if (dragging && mode !== "draw") elCanvas.style.cursor = "grab";
       dragging = false;
     });
+
+    // ---- touch: 1 finger = draw/pan (same as mouse), 2 fingers = pinch-zoom ----
+    function localXY(clientX, clientY) {
+      var r = elCanvas.getBoundingClientRect();
+      return [clientX - r.left, clientY - r.top];
+    }
+    var pinch = null;
+    elCanvas.addEventListener("touchstart", function (e) {
+      if (e.touches.length === 1) {
+        e.preventDefault();
+        var xy = localXY(e.touches[0].clientX, e.touches[0].clientY);
+        dragging = true; lastPt = xy; pinch = null;
+        if (mode === "draw") { line = [toSvg(xy[0], xy[1])]; render(); }
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        dragging = false;
+        if (mode === "draw" && line.length < 2) line = [];   // drop a stray tap-started line
+        var a = localXY(e.touches[0].clientX, e.touches[0].clientY);
+        var b = localXY(e.touches[1].clientX, e.touches[1].clientY);
+        pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) };
+      }
+    }, { passive: false });
+    elCanvas.addEventListener("touchmove", function (e) {
+      if (e.touches.length === 1 && dragging) {
+        e.preventDefault();
+        var xy = localXY(e.touches[0].clientX, e.touches[0].clientY);
+        if (mode === "draw") { line.push(toSvg(xy[0], xy[1])); }
+        else { view.tx += xy[0] - lastPt[0]; view.ty += xy[1] - lastPt[1]; }
+        lastPt = xy; render();
+      } else if (e.touches.length === 2 && pinch) {
+        e.preventDefault();
+        var a = localXY(e.touches[0].clientX, e.touches[0].clientY);
+        var b = localXY(e.touches[1].clientX, e.touches[1].clientY);
+        var d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        var cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
+        var pre = toSvg(cx, cy);                 // keep the pinch midpoint anchored
+        if (pinch.d > 0) view.scale *= d / pinch.d;
+        view.tx = cx - pre[0] * view.scale;
+        view.ty = cy - pre[1] * view.scale;
+        pinch.d = d; render();
+      }
+    }, { passive: false });
+    function endTouch(e) {
+      if (e.touches.length === 0) { dragging = false; pinch = null; }
+      else if (e.touches.length === 1) {         // pinch -> single finger left
+        pinch = null; dragging = (mode !== "draw");
+        lastPt = localXY(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    }
+    elCanvas.addEventListener("touchend", endTouch, { passive: false });
+    elCanvas.addEventListener("touchcancel", endTouch, { passive: false });
     window.addEventListener("keydown", function (e) {
       if (elOverlay.style.display === "none") return;
       if (e.key === "Escape") close();
@@ -213,7 +264,7 @@
     var css = document.createElement("style");
     css.textContent =
       "#svged{position:fixed;inset:0;z-index:2000;background:#0b0e12;display:none}" +
-      "#svged canvas{position:absolute;inset:0;width:100%;height:100%;display:block}" +
+      "#svged canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}" +
       "#svged .bar{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;" +
       "background:rgba(20,26,33,.92);border:1px solid #2a323d;border-radius:12px;padding:8px 10px;" +
       "box-shadow:0 6px 24px #0008;align-items:center}" +
