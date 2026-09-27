@@ -17,6 +17,7 @@
   .btn.file { position:relative; overflow:hidden; }
   .btn.file input { position:absolute; inset:0; opacity:0; cursor:pointer; }
   .hint { color:var(--mut); font-size:12px; }
+  #xpos { min-width:92px; text-align:right; font-variant-numeric:tabular-nums; }
   #stage { position:absolute; top:52px; left:0; right:0; bottom:0; display:flex; }
   .side { position:relative; flex:1 1 50%; overflow:hidden; }
   .side + .side { border-left:1px solid var(--line); }
@@ -47,6 +48,7 @@
   <button class="btn" id="fit">重設視圖</button>
   <button class="btn" id="clrpt">清除點</button>
   <button class="btn" id="clrcp">清空右側</button>
+  <div class="hint" id="xpos">x: --%</div>
   <span class="sp"></span>
   <span class="hint">左圖點一下 → 該 x 位置上所有色塊(整條垂直帶)複製到右側 · 拖曳平移 · 滾輪縮放(左右同步)</span>
 </div>
@@ -78,6 +80,7 @@ const dpr = Math.max(1, window.devicePixelRatio || 1);
 const left = $("left"), right = $("right"), stage = $("stage");
 const lwrap = $("lwrap"), rwrap = $("rwrap"), host = $("host"), rsvg = $("rsvg");
 const cv = $("cv"), ctx = cv.getContext("2d"), flyer = $("flyer");
+const xpos = $("xpos");
 
 let lsvg = null;                 // parsed source <svg>
 let vbW = 0, vbH = 0;            // viewBox size (user units)
@@ -86,6 +89,13 @@ let view = { s: 1, tx: 0, ty: 0 };   // shared zoom/pan
 let pts = [];                    // markers in base-css-px (local) coords
 let copied = new Set();          // source rids already mirrored on the right
 const GEOMS = "path,rect,circle,ellipse,polygon,polyline,line";
+
+function setXPercent(localX) {
+  if (!xpos) return;
+  if (!baseW || !Number.isFinite(localX)) { xpos.textContent = "x: --%"; return; }
+  const pct = Math.max(0, Math.min(100, (localX / baseW) * 100));
+  xpos.textContent = `x: ${pct.toFixed(2)}%`;
+}
 
 /* ---- load ---- */
 function loadSvgText(text) {
@@ -109,6 +119,7 @@ function loadSvgText(text) {
   rsvg.setAttribute("viewBox", vb);
 
   pts = []; copied.clear();
+  setXPercent(NaN);
   stage.classList.add("loaded"); $("drop").style.display = "none";
   fitView();
 }
@@ -227,6 +238,7 @@ window.addEventListener("mouseup", e => {
   if (d.moved || !lsvg) return;
   if (d.side.id === "left") {                       // a click on the source
     const lp = localPt(e.clientX, e.clientY);
+    setXPercent(lp.x);
     const hits = hitTestVertical(e.clientX);        // every color block crossing this x (vertical strip)
     pts.push({ x: lp.x, y: lp.y, hit: hits.length > 0 }); redraw();
     for (const el of hits) copyRegion(el);
