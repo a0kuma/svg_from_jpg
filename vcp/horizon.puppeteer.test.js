@@ -36,7 +36,7 @@ async function main() {
     const pageErrors = [];
     page.on("pageerror", error => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${port}/vcp/index.html`, { waitUntil: "networkidle0" });
-    await page.waitForFunction(() => typeof window.d3 !== "undefined");
+    await page.waitForFunction(() => typeof window.d3 !== "undefined" && typeof window.Plotly !== "undefined");
 
     const fixture = await readFile(fixturePath, "utf8");
     const result = await page.evaluate(async markup => {
@@ -78,7 +78,7 @@ async function main() {
     assert.equal(reversedY[2][3], "0.000000", "a D3 point at the visual top normalizes to 0");
 
     await page.click("#horizon");
-    await page.waitForSelector(".swal2-popup #horizon-chart svg");
+    await page.waitForSelector(".swal2-popup #horizon-chart .main-svg");
     await page.waitForSelector("#download-horizon-csv");
     await page.evaluate(() => {
       window.horizonDownload = null;
@@ -88,21 +88,23 @@ async function main() {
     const download = await page.evaluate(() => window.horizonDownload);
     assert.equal(download.name, "horizon.csv", "the CSV button requests the Horizon filename");
     assert.ok(download.href.startsWith("blob:"), "the CSV button creates a downloadable blob");
-    const chart = await page.$eval("#horizon-chart path", element => element.getAttribute("d"));
-    assert.ok(chart && chart.length > 0, "D3 renders ex.svg as a skyline path");
-    const background = await page.$eval("#horizon-chart image.horizon-source", element => element.getAttribute("href"));
-    assert.ok(background.startsWith("data:image/svg+xml"), "D3 uses the loaded SVG as the skyline background");
-    const hoverPoint = await page.$eval("#horizon-chart .horizon-hover-area", overlay => {
-      const rect = overlay.getBoundingClientRect();
-      overlay.dispatchEvent(new PointerEvent("pointermove", {
-        bubbles: true,
-        clientX: rect.left + rect.width * 0.45,
-        clientY: rect.top + rect.height * 0.5
-      }));
-      const tooltip = document.querySelector("#horizon-chart .horizon-point-tooltip");
-      return { index: tooltip.dataset.index, x: tooltip.dataset.x, y: tooltip.dataset.y, display: tooltip.style.display };
-    });
-    assert.deepEqual(hoverPoint, { index: "1360", x: "134.9702380952381", y: "217.31150793650795", display: "" }, "D3 hover reports the nearest skyline point");
+    const chart = await page.$eval("#horizon-chart", graph => ({
+      xLength: graph.data[0].x.length,
+      yAt1360: graph.data[0].y[1360],
+      hoverTemplate: graph.data[0].hovertemplate,
+      uirevision: graph.layout.uirevision,
+      imageSource: graph.layout.images[0].source
+    }));
+    assert.equal(chart.xLength, 3024, "Plotly receives every skyline sample");
+    assert.equal(chart.yAt1360, 217.31150793650795, "Plotly receives the expected 45% point value");
+    assert.match(chart.hoverTemplate, /x: %{x:.6f}/, "Plotly owns the x/y hover content");
+    assert.equal(chart.uirevision, "horizon-v1", "Plotly preserves zoom and pan state across updates");
+    assert.ok(chart.imageSource.startsWith("data:image/svg+xml"), "Plotly uses the loaded SVG as the skyline background");
+    await page.evaluate(() => Plotly.Fx.hover(document.querySelector("#horizon-chart"), [{ curveNumber: 0, pointNumber: 1360 }]));
+    await page.waitForSelector("#horizon-chart .hovertext");
+    const hoverText = await page.$eval("#horizon-chart .hovertext", element => element.textContent);
+    assert.match(hoverText, /x: 134.970238/, "Plotly renders the selected point x in its native hover label");
+    assert.match(hoverText, /y: 217.311508/, "Plotly renders the selected point y in its native hover label");
     assert.deepEqual(pageErrors, [], "the browser reported no runtime errors");
     console.log("Horizon Puppeteer test: OK");
   } finally {

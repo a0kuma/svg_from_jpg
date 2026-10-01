@@ -79,6 +79,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -216,71 +217,44 @@ function downloadHorizonCsv(points, scales) {
 }
 function renderHorizonPlot({ box, points }) {
   const root = $("horizon-chart");
-  const margin = { top: 20, right: 22, bottom: 46, left: 62 };
-  const availableW = Math.max(320, Math.min(820, root.clientWidth || 720)) - margin.left - margin.right;
-  const maxInnerH = 520;
-  let innerW = availableW;
-  let innerH = innerW * box.height / box.width;
-  if (innerH > maxInnerH) { innerH = maxInnerH; innerW = innerH * box.width / box.height; }
-  const width = innerW + margin.left + margin.right, height = innerH + margin.top + margin.bottom;
-  const x = d3.scaleLinear().domain([box.x, box.x + box.width]).range([0, innerW]);
-  // SVG coordinates increase downward, so use the same direction in the chart.
-  const y = d3.scaleLinear().domain([box.y, box.y + box.height]).range([0, innerH]);
+  const csvX = d3.scaleLinear().domain([box.x, box.x + box.width]).range([0, box.width]);
+  const csvY = d3.scaleLinear().domain([box.y, box.y + box.height]).range([0, box.height]);
   const sourceUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(lsvg))}`;
-  const svg = d3.select(root).append("svg").attr("viewBox", `0 0 ${width} ${height}`)
-    .attr("width", "100%").attr("role", "img").attr("aria-label", "Skyline over source SVG");
-  const plot = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-  plot.append("image").attr("class", "horizon-source").attr("href", sourceUrl)
-    .attr("x", 0).attr("y", 0).attr("width", innerW).attr("height", innerH)
-    .attr("preserveAspectRatio", "none");
-  plot.append("g").attr("transform", `translate(0,${innerH})`).call(d3.axisBottom(x).ticks(8));
-  plot.append("g").call(d3.axisLeft(y).ticks(6));
-  plot.append("text").attr("x", innerW / 2).attr("y", innerH + 38).attr("fill", "#8b98a8")
-    .attr("text-anchor", "middle").text("x (SVG units)");
-  plot.append("text").attr("transform", "rotate(-90)").attr("x", -innerH / 2).attr("y", -46).attr("fill", "#8b98a8")
-    .attr("text-anchor", "middle").text("skyline y (first filled pixel)");
-  plot.append("path").datum(points).attr("fill", "none").attr("stroke", "#ff5d73").attr("stroke-width", 2.5)
-    .attr("d", d3.line().defined(d => d.y !== null).x(d => x(d.x)).y(d => y(d.y)).curve(d3.curveStepAfter));
-
-  const marker = plot.append("circle").attr("class", "horizon-hover-marker")
-    .attr("r", 4).attr("fill", "#fff").attr("stroke", "#ff5d73").attr("stroke-width", 2)
-    .style("display", "none").style("pointer-events", "none");
-  const tooltip = plot.append("g").attr("class", "horizon-point-tooltip")
-    .attr("aria-hidden", "true").style("display", "none").style("pointer-events", "none");
-  tooltip.append("rect").attr("width", 172).attr("height", 54).attr("rx", 5)
-    .attr("fill", "rgba(15,18,22,.94)").attr("stroke", "#8b98a8");
-  const pointText = tooltip.append("text").attr("x", 8).attr("y", 19).attr("fill", "#e6edf3")
-    .attr("font-size", 12).attr("font-family", "system-ui, sans-serif");
-  const valueText = tooltip.append("text").attr("x", 8).attr("y", 38).attr("fill", "#4dd0e1")
-    .attr("font-size", 12).attr("font-family", "system-ui, sans-serif");
-  const formatValue = d3.format(".6f");
-  const nearestPoint = d3.bisector(d => d.x).center;
-
-  function showPoint(event) {
-    const [pointerX] = d3.pointer(event, plot.node());
-    const clampedX = Math.max(0, Math.min(innerW, pointerX));
-    const index = nearestPoint(points, x.invert(clampedX));
-    const point = points[index];
-    const pointX = x(point.x);
-    const hasY = Number.isFinite(point.y);
-    const pointY = hasY ? y(point.y) : 0;
-    const labelX = Math.max(0, Math.min(innerW - 172, pointX + 10));
-    const labelY = Math.max(0, Math.min(innerH - 54, (hasY ? pointY : 0) + 10));
-
-    tooltip.attr("transform", `translate(${labelX},${labelY})`).attr("data-index", index)
-      .attr("data-x", point.x).attr("data-y", point.y ?? "")
-      .style("display", null);
-    pointText.text(`point ${index + 1}/${points.length}`);
-    valueText.text(`x: ${formatValue(point.x)}  y: ${hasY ? formatValue(point.y) : "no filled pixel"}`);
-    marker.attr("cx", pointX).attr("cy", pointY).style("display", hasY ? null : "none");
-  }
-
-  plot.append("rect").attr("class", "horizon-hover-area")
-    .attr("x", 0).attr("y", 0).attr("width", innerW).attr("height", innerH)
-    .attr("fill", "transparent").style("cursor", "crosshair")
-    .on("pointermove", showPoint)
-    .on("pointerleave", () => { tooltip.style("display", "none"); marker.style("display", "none"); });
-  return { x, y };
+  const trace = {
+    type: "scatter",
+    mode: "lines+markers",
+    x: points.map(point => point.x),
+    y: points.map(point => point.y),
+    customdata: points.map((point, index) => [index + 1, points.length]),
+    line: { color: "#ff5d73", width: 2.5, shape: "hv" },
+    marker: { color: "rgba(255,93,115,0)", size: 5 },
+    hovertemplate: "point %{customdata[0]}/%{customdata[1]}<br>x: %{x:.6f}<br>y: %{y:.6f}<extra></extra>",
+    hoverlabel: { bgcolor: "#0f1216", bordercolor: "#8b98a8", font: { color: "#e6edf3" } }
+  };
+  const layout = {
+    autosize: true,
+    height: 590,
+    margin: { t: 20, r: 22, b: 46, l: 62 },
+    paper_bgcolor: "#0f1216",
+    plot_bgcolor: "#0f1216",
+    hovermode: "closest",
+    uirevision: "horizon-v1",
+    xaxis: {
+      range: [box.x, box.x + box.width], title: "x (SVG units)", color: "#8b98a8",
+      gridcolor: "rgba(139,152,168,.25)", zeroline: false
+    },
+    yaxis: {
+      range: [box.y + box.height, box.y], title: "skyline y (first filled pixel)", color: "#8b98a8",
+      gridcolor: "rgba(139,152,168,.25)", zeroline: false
+    },
+    images: [{
+      source: sourceUrl, xref: "x", yref: "y", x: box.x, y: box.y,
+      sizex: box.width, sizey: box.height, xanchor: "left", yanchor: "top",
+      sizing: "stretch", layer: "below", opacity: 1
+    }]
+  };
+  Plotly.react(root, [trace], layout, { responsive: true, displaylogo: false });
+  return { x: csvX, y: csvY };
 }
 
 /* ---- load ---- */
