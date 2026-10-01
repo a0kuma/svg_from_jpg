@@ -1,9 +1,19 @@
 const input = document.getElementById("group-input");
 const button = document.getElementById("download-button");
 const status = document.getElementById("status");
+const widthInput = document.getElementById("svg-width");
+const heightInput = document.getElementById("svg-height");
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
-function svgFromGroup(markup) {
+function positiveDimension(value, label) {
+  const dimension = Number(value);
+  if (!Number.isFinite(dimension) || dimension <= 0) throw new Error(`${label} 必須是正數。`);
+  return dimension;
+}
+
+function svgFromGroup(markup, width, height) {
+  const svgWidth = positiveDimension(width, "SVG 寬度");
+  const svgHeight = positiveDimension(height, "SVG 高度");
   const source = markup.trim();
   if (!source) throw new Error("請先貼上 <g> 元素。");
 
@@ -23,7 +33,7 @@ function svgFromGroup(markup) {
 
   const group = new XMLSerializer().serializeToString(elements[0]);
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="${SVG_NAMESPACE}" version="1.1">
+<svg xmlns="${SVG_NAMESPACE}" width="${svgWidth}" height="${svgHeight}" version="1.1">
   ${group}
 </svg>
 `;
@@ -43,7 +53,7 @@ function downloadSvg(svgText) {
 
 button.addEventListener("click", () => {
   try {
-    downloadSvg(svgFromGroup(input.value));
+    downloadSvg(svgFromGroup(input.value, widthInput.value, heightInput.value));
     status.textContent = "SVG 已下載。";
   } catch (error) {
     status.textContent = error.message;
