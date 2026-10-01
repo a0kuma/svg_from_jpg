@@ -157,6 +157,8 @@ function computeBase() {
   const s0 = Math.min(pw / vbW, ph / vbH) * 0.94;
   baseW = vbW * s0; baseH = vbH * s0;
 
+  lwrap.style.width = baseW + "px"; lwrap.style.height = baseH + "px";
+  rwrap.style.width = baseW + "px"; rwrap.style.height = baseH + "px";
   for (const svg of [lsvg, rsvg]) if (svg) { svg.style.width = baseW + "px"; svg.style.height = baseH + "px"; }
   cv.style.width = baseW + "px"; cv.style.height = baseH + "px";
   cv.width = Math.round(baseW * dpr); cv.height = Math.round(baseH * dpr);
