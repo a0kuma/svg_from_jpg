@@ -79,6 +79,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -216,32 +217,44 @@ function downloadHorizonCsv(points, scales) {
 }
 function renderHorizonPlot({ box, points }) {
   const root = $("horizon-chart");
-  const margin = { top: 20, right: 22, bottom: 46, left: 62 };
-  const availableW = Math.max(320, Math.min(820, root.clientWidth || 720)) - margin.left - margin.right;
-  const maxInnerH = 520;
-  let innerW = availableW;
-  let innerH = innerW * box.height / box.width;
-  if (innerH > maxInnerH) { innerH = maxInnerH; innerW = innerH * box.width / box.height; }
-  const width = innerW + margin.left + margin.right, height = innerH + margin.top + margin.bottom;
-  const x = d3.scaleLinear().domain([box.x, box.x + box.width]).range([0, innerW]);
-  // SVG coordinates increase downward, so use the same direction in the chart.
-  const y = d3.scaleLinear().domain([box.y, box.y + box.height]).range([0, innerH]);
+  const csvX = d3.scaleLinear().domain([box.x, box.x + box.width]).range([0, box.width]);
+  const csvY = d3.scaleLinear().domain([box.y, box.y + box.height]).range([0, box.height]);
   const sourceUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(lsvg))}`;
-  const svg = d3.select(root).append("svg").attr("viewBox", `0 0 ${width} ${height}`)
-    .attr("width", "100%").attr("role", "img").attr("aria-label", "Skyline over source SVG");
-  const plot = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-  plot.append("image").attr("class", "horizon-source").attr("href", sourceUrl)
-    .attr("x", 0).attr("y", 0).attr("width", innerW).attr("height", innerH)
-    .attr("preserveAspectRatio", "none");
-  plot.append("g").attr("transform", `translate(0,${innerH})`).call(d3.axisBottom(x).ticks(8));
-  plot.append("g").call(d3.axisLeft(y).ticks(6));
-  plot.append("text").attr("x", innerW / 2).attr("y", innerH + 38).attr("fill", "#8b98a8")
-    .attr("text-anchor", "middle").text("x (SVG units)");
-  plot.append("text").attr("transform", "rotate(-90)").attr("x", -innerH / 2).attr("y", -46).attr("fill", "#8b98a8")
-    .attr("text-anchor", "middle").text("skyline y (first filled pixel)");
-  plot.append("path").datum(points).attr("fill", "none").attr("stroke", "#ff5d73").attr("stroke-width", 2.5)
-    .attr("d", d3.line().defined(d => d.y !== null).x(d => x(d.x)).y(d => y(d.y)).curve(d3.curveStepAfter));
-  return { x, y };
+  const trace = {
+    type: "scatter",
+    mode: "lines+markers",
+    x: points.map(point => point.x),
+    y: points.map(point => point.y),
+    customdata: points.map((point, index) => [index + 1, points.length]),
+    line: { color: "#ff5d73", width: 2.5, shape: "hv" },
+    marker: { color: "rgba(255,93,115,0)", size: 5 },
+    hovertemplate: "point %{customdata[0]}/%{customdata[1]}<br>x: %{x:.6f}<br>y: %{y:.6f}<extra></extra>",
+    hoverlabel: { bgcolor: "#0f1216", bordercolor: "#8b98a8", font: { color: "#e6edf3" } }
+  };
+  const layout = {
+    autosize: true,
+    height: 590,
+    margin: { t: 20, r: 22, b: 46, l: 62 },
+    paper_bgcolor: "#0f1216",
+    plot_bgcolor: "#0f1216",
+    hovermode: "closest",
+    uirevision: "horizon-v1",
+    xaxis: {
+      range: [box.x, box.x + box.width], title: "x (SVG units)", color: "#8b98a8",
+      gridcolor: "rgba(139,152,168,.25)", zeroline: false
+    },
+    yaxis: {
+      range: [box.y + box.height, box.y], title: "skyline y (first filled pixel)", color: "#8b98a8",
+      gridcolor: "rgba(139,152,168,.25)", zeroline: false
+    },
+    images: [{
+      source: sourceUrl, xref: "x", yref: "y", x: box.x, y: box.y,
+      sizex: box.width, sizey: box.height, xanchor: "left", yanchor: "top",
+      sizing: "stretch", layer: "below", opacity: 1
+    }]
+  };
+  Plotly.react(root, [trace], layout, { responsive: true, displaylogo: false });
+  return { x: csvX, y: csvY };
 }
 
 /* ---- load ---- */
