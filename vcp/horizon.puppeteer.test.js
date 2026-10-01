@@ -41,17 +41,19 @@ async function main() {
     const fixture = await readFile(fixturePath, "utf8");
     const result = await page.evaluate(async markup => {
       loadSvgText(markup);
-      const { box, points } = await horizonSamples();
-      return { box: { x: box.x, y: box.y, width: box.width, height: box.height }, points };
+      const { box, points, sampleWidth, sampleHeight } = await horizonSamples();
+      return { box: { x: box.x, y: box.y, width: box.width, height: box.height }, points, sampleWidth, sampleHeight };
     }, fixture);
 
     assert.deepEqual(result.box, { x: 0, y: 0, width: 300, height: 400 });
-    assert.equal(result.points.length, 300, "ex.svg is sampled once per x-unit");
-    assert.equal(result.points.filter(point => point.y !== null).length, 300, "ex.svg has a skyline value for every x column");
-    const at20Percent = result.points[60].y;
-    const at70Percent = result.points[210].y;
-    assert.ok(Math.abs(at20Percent - 124.5) < 0.01, "20% x has the expected skyline y");
-    assert.ok(Math.abs(at70Percent - 95.5) < 0.01, "70% x has the expected skyline y");
+    assert.equal(result.sampleWidth, 3024, "ex.svg uses every source x-pixel");
+    assert.equal(result.sampleHeight, 4032, "ex.svg uses every source y-pixel");
+    assert.equal(result.points.length, 3024, "ex.svg produces one point per source x-pixel");
+    assert.equal(result.points.filter(point => point.y !== null).length, 3024, "ex.svg has a skyline value for every source x-pixel");
+    const at20Percent = result.points[Math.floor(result.points.length * 0.2)].y;
+    const at70Percent = result.points[Math.floor(result.points.length * 0.7)].y;
+    assert.ok(Math.abs(at20Percent - 124.05754) < 0.01, "20% x has the expected skyline y");
+    assert.ok(Math.abs(at70Percent - 94.99008) < 0.01, "70% x has the expected skyline y");
     assert.notEqual(at20Percent, at70Percent, "the real skyline varies across ex.svg");
 
     await page.click("#horizon");

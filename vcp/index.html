@@ -91,6 +91,7 @@ const xpos = $("xpos"), lshade = $("lshade"), rshade = $("rshade");
 
 let lsvg = null;                 // parsed source <svg>
 let vbW = 0, vbH = 0;            // viewBox size (user units)
+let sourcePxW = 0, sourcePxH = 0;  // original SVG raster dimensions
 let baseW = 0, baseH = 0;        // rendered size at zoom=1 (css px)
 let view = { s: 1, tx: 0, ty: 0 };   // shared zoom/pan
 let pts = [];                    // markers in base-css-px (local) coords
@@ -143,16 +144,16 @@ function filledGeometryClone() {
   });
   clone.querySelectorAll("image,text").forEach(el => el.setAttribute("display", "none"));
   const box = lsvg.viewBox.baseVal;
-  clone.setAttribute("width", box.width);
-  clone.setAttribute("height", box.height);
+  clone.setAttribute("width", sourcePxW);
+  clone.setAttribute("height", sourcePxH);
   clone.setAttribute("viewBox", `${box.x} ${box.y} ${box.width} ${box.height}`);
   return clone;
 }
 async function horizonSamples() {
   const box = lsvg.viewBox.baseVal;
-  // Preserve one sample per SVG x-unit for normal files; cap extreme files to keep the UI responsive.
-  const width = Math.min(2048, Math.max(1, Math.ceil(box.width)));
-  const height = Math.min(2048, Math.max(1, Math.round(width * box.height / box.width)));
+  // Sample every pixel of the source SVG, rather than every viewBox unit.
+  const width = sourcePxW;
+  const height = sourcePxH;
   const xml = new XMLSerializer().serializeToString(filledGeometryClone());
   const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
   let image;
@@ -180,7 +181,7 @@ async function horizonSamples() {
       y: py === height ? null : box.y + ((py + 0.5) / height) * box.height
     });
   }
-  return { box, points };
+  return { box, points, sampleWidth: width, sampleHeight: height };
 }
 function renderHorizonPlot({ box, points }) {
   const root = $("horizon-chart");
@@ -213,6 +214,8 @@ function loadSvgText(text) {
   if (vb) { const p = vb.split(/[\s,]+/).map(Number); vbW = p[2]; vbH = p[3]; }
   else { vbW = parseFloat(svg.getAttribute("width")) || 300;
          vbH = parseFloat(svg.getAttribute("height")) || 300; vb = `0 0 ${vbW} ${vbH}`; }
+  sourcePxW = Math.max(1, Math.ceil(parseFloat(svg.getAttribute("width")) || vbW));
+  sourcePxH = Math.max(1, Math.ceil(parseFloat(svg.getAttribute("height")) || vbH));
 
   host.innerHTML = "";
   lsvg = document.importNode(svg, true);
