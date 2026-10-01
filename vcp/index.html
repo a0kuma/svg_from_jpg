@@ -241,6 +241,45 @@ function renderHorizonPlot({ box, points }) {
     .attr("text-anchor", "middle").text("skyline y (first filled pixel)");
   plot.append("path").datum(points).attr("fill", "none").attr("stroke", "#ff5d73").attr("stroke-width", 2.5)
     .attr("d", d3.line().defined(d => d.y !== null).x(d => x(d.x)).y(d => y(d.y)).curve(d3.curveStepAfter));
+
+  const marker = plot.append("circle").attr("class", "horizon-hover-marker")
+    .attr("r", 4).attr("fill", "#fff").attr("stroke", "#ff5d73").attr("stroke-width", 2)
+    .style("display", "none").style("pointer-events", "none");
+  const tooltip = plot.append("g").attr("class", "horizon-point-tooltip")
+    .attr("aria-hidden", "true").style("display", "none").style("pointer-events", "none");
+  tooltip.append("rect").attr("width", 172).attr("height", 54).attr("rx", 5)
+    .attr("fill", "rgba(15,18,22,.94)").attr("stroke", "#8b98a8");
+  const pointText = tooltip.append("text").attr("x", 8).attr("y", 19).attr("fill", "#e6edf3")
+    .attr("font-size", 12).attr("font-family", "system-ui, sans-serif");
+  const valueText = tooltip.append("text").attr("x", 8).attr("y", 38).attr("fill", "#4dd0e1")
+    .attr("font-size", 12).attr("font-family", "system-ui, sans-serif");
+  const formatValue = d3.format(".6f");
+  const nearestPoint = d3.bisector(d => d.x).center;
+
+  function showPoint(event) {
+    const [pointerX] = d3.pointer(event, plot.node());
+    const clampedX = Math.max(0, Math.min(innerW, pointerX));
+    const index = nearestPoint(points, x.invert(clampedX));
+    const point = points[index];
+    const pointX = x(point.x);
+    const hasY = Number.isFinite(point.y);
+    const pointY = hasY ? y(point.y) : 0;
+    const labelX = Math.max(0, Math.min(innerW - 172, pointX + 10));
+    const labelY = Math.max(0, Math.min(innerH - 54, (hasY ? pointY : 0) + 10));
+
+    tooltip.attr("transform", `translate(${labelX},${labelY})`).attr("data-index", index)
+      .attr("data-x", point.x).attr("data-y", point.y ?? "")
+      .style("display", null);
+    pointText.text(`point ${index + 1}/${points.length}`);
+    valueText.text(`x: ${formatValue(point.x)}  y: ${hasY ? formatValue(point.y) : "no filled pixel"}`);
+    marker.attr("cx", pointX).attr("cy", pointY).style("display", hasY ? null : "none");
+  }
+
+  plot.append("rect").attr("class", "horizon-hover-area")
+    .attr("x", 0).attr("y", 0).attr("width", innerW).attr("height", innerH)
+    .attr("fill", "transparent").style("cursor", "crosshair")
+    .on("pointermove", showPoint)
+    .on("pointerleave", () => { tooltip.style("display", "none"); marker.style("display", "none"); });
   return { x, y };
 }
 

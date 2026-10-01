@@ -92,6 +92,17 @@ async function main() {
     assert.ok(chart && chart.length > 0, "D3 renders ex.svg as a skyline path");
     const background = await page.$eval("#horizon-chart image.horizon-source", element => element.getAttribute("href"));
     assert.ok(background.startsWith("data:image/svg+xml"), "D3 uses the loaded SVG as the skyline background");
+    const hoverPoint = await page.$eval("#horizon-chart .horizon-hover-area", overlay => {
+      const rect = overlay.getBoundingClientRect();
+      overlay.dispatchEvent(new PointerEvent("pointermove", {
+        bubbles: true,
+        clientX: rect.left + rect.width * 0.45,
+        clientY: rect.top + rect.height * 0.5
+      }));
+      const tooltip = document.querySelector("#horizon-chart .horizon-point-tooltip");
+      return { index: tooltip.dataset.index, x: tooltip.dataset.x, y: tooltip.dataset.y, display: tooltip.style.display };
+    });
+    assert.deepEqual(hoverPoint, { index: "1360", x: "134.9702380952381", y: "217.31150793650795", display: "" }, "D3 hover reports the nearest skyline point");
     assert.deepEqual(pageErrors, [], "the browser reported no runtime errors");
     console.log("Horizon Puppeteer test: OK");
   } finally {
