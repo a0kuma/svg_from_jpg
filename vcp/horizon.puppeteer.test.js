@@ -60,6 +60,8 @@ async function main() {
     await page.waitForSelector(".swal2-popup #horizon-chart svg");
     const chart = await page.$eval("#horizon-chart path", element => element.getAttribute("d"));
     assert.ok(chart && chart.length > 0, "D3 renders ex.svg as a skyline path");
+    const background = await page.$eval("#horizon-chart image.horizon-source", element => element.getAttribute("href"));
+    assert.ok(background.startsWith("data:image/svg+xml"), "D3 uses the loaded SVG as the skyline background");
     assert.deepEqual(pageErrors, [], "the browser reported no runtime errors");
     console.log("Horizon Puppeteer test: OK");
   } finally {
