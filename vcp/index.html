@@ -50,6 +50,7 @@
   <button class="btn" id="clrpt">清除點</button>
   <button class="btn" id="clrcp">清空右側</button>
   <button class="btn" id="shade">套用垂直色帶</button>
+  <button class="btn" id="horizon">Horizon</button>
   <div class="hint" id="xpos">x: --%</div>
   <span class="sp"></span>
   <span class="hint">左圖點一下 → 該 x 位置上所有色塊(整條垂直帶)複製到右側 · 拖曳平移 · 滾輪縮放(左右同步)</span>
@@ -77,6 +78,7 @@
 <div id="flyer"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
@@ -121,6 +123,84 @@ function applyShade(startPct, endPct, hex, alpha) {
     sh.style.background = rgba;
     sh.style.display = "block";
   }
+}
+
+/* ---- horizon: maximum filled y for every sampled x ---- */
+function filledGeometryClone() {
+  const clone = lsvg.cloneNode(true);
+  const originals = [...lsvg.querySelectorAll(GEOMS)];
+  const copies = [...clone.querySelectorAll(GEOMS)];
+  originals.forEach((el, i) => {
+    const copy = copies[i], cs = getComputedStyle(el);
+    const hidden = cs.fill === "none" || Number(cs.fillOpacity) === 0 || Number(cs.opacity) === 0 ||
+      cs.display === "none" || cs.visibility === "hidden";
+    if (hidden) { copy.setAttribute("display", "none"); return; }
+    copy.setAttribute("fill", cs.fill);
+    copy.setAttribute("fill-opacity", cs.fillOpacity);
+    copy.setAttribute("fill-rule", cs.fillRule);
+    copy.setAttribute("stroke", "none");
+    copy.setAttribute("opacity", cs.opacity);
+  });
+  clone.querySelectorAll("image,text").forEach(el => el.setAttribute("display", "none"));
+  const box = lsvg.viewBox.baseVal;
+  clone.setAttribute("width", box.width);
+  clone.setAttribute("height", box.height);
+  clone.setAttribute("viewBox", `${box.x} ${box.y} ${box.width} ${box.height}`);
+  return clone;
+}
+async function horizonSamples() {
+  const box = lsvg.viewBox.baseVal;
+  // Preserve one sample per SVG x-unit for normal files; cap extreme files to keep the UI responsive.
+  const width = Math.min(2048, Math.max(1, Math.ceil(box.width)));
+  const height = Math.min(2048, Math.max(1, Math.round(width * box.height / box.width)));
+  const xml = new XMLSerializer().serializeToString(filledGeometryClone());
+  const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml" }));
+  let image;
+  try {
+    image = await new Promise((resolve, reject) => {
+      const next = new Image();
+      next.onload = () => resolve(next);
+      next.onerror = () => reject(new Error("SVG rasterization failed"));
+      next.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, width, height);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const points = [];
+  for (let px = 0; px < width; px++) {
+    let py = height - 1;
+    while (py >= 0 && pixels[(py * width + px) * 4 + 3] === 0) py--;
+    points.push({
+      x: box.x + ((px + 0.5) / width) * box.width,
+      y: py < 0 ? null : box.y + ((py + 0.5) / height) * box.height
+    });
+  }
+  return { box, points };
+}
+function renderHorizonPlot({ box, points }) {
+  const root = $("horizon-chart");
+  const width = Math.max(320, Math.min(820, root.clientWidth || 720)), height = 390;
+  const margin = { top: 20, right: 22, bottom: 46, left: 62 };
+  const innerW = width - margin.left - margin.right, innerH = height - margin.top - margin.bottom;
+  const x = d3.scaleLinear().domain([box.x, box.x + box.width]).range([0, innerW]);
+  // SVG coordinates increase downward, so use the same direction in the chart.
+  const y = d3.scaleLinear().domain([box.y, box.y + box.height]).range([0, innerH]);
+  const svg = d3.select(root).append("svg").attr("viewBox", `0 0 ${width} ${height}`)
+    .attr("width", "100%").attr("role", "img").attr("aria-label", "Maximum filled y by x");
+  const plot = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+  plot.append("g").attr("transform", `translate(0,${innerH})`).call(d3.axisBottom(x).ticks(8));
+  plot.append("g").call(d3.axisLeft(y).ticks(6));
+  plot.append("text").attr("x", innerW / 2).attr("y", innerH + 38).attr("fill", "#8b98a8")
+    .attr("text-anchor", "middle").text("x (SVG units)");
+  plot.append("text").attr("transform", "rotate(-90)").attr("x", -innerH / 2).attr("y", -46).attr("fill", "#8b98a8")
+    .attr("text-anchor", "middle").text("maximum filled y");
+  plot.append("path").datum(points).attr("fill", "none").attr("stroke", "#4dd0e1").attr("stroke-width", 2)
+    .attr("d", d3.line().defined(d => d.y !== null).x(d => x(d.x)).y(d => y(d.y)).curve(d3.curveStepAfter));
 }
 
 /* ---- load ---- */
@@ -321,6 +401,26 @@ $("shade").onclick = async () => {
     }
   });
   if (result.isConfirmed) applyShade(result.value.start, result.value.end, result.value.color, result.value.alpha);
+};
+$("horizon").onclick = async () => {
+  if (!lsvg) { Swal.fire("請先載入 SVG"); return; }
+  const button = $("horizon");
+  button.disabled = true; button.textContent = "Horizon…";
+  try {
+    const result = await horizonSamples();
+    if (!result.points.some(point => point.y !== null)) { Swal.fire("找不到有填色的圖形"); return; }
+    await Swal.fire({
+      title: "Horizon",
+      html: `<div class="hint" style="margin-bottom:10px;">每個 x 的最大片段填色 y 值（${result.points.length} 個取樣點）</div><div id="horizon-chart"></div>`,
+      width: 900,
+      didOpen: () => renderHorizonPlot(result)
+    });
+  } catch (error) {
+    console.error(error);
+    Swal.fire("Horizon 圖表產生失敗");
+  } finally {
+    button.disabled = false; button.textContent = "Horizon";
+  }
 };
 ["dragover", "dragenter"].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); stage.classList.add("dragover"); }));
 ["dragleave", "drop"].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); if (t === "dragleave" && e.target !== stage) return; stage.classList.remove("dragover"); }));
