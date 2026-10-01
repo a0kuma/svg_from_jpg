@@ -58,7 +58,10 @@ async function main() {
 
     const csv = await page.evaluate(async markup => {
       loadSvgText(markup);
-      return horizonCsv((await horizonSamples()).points);
+      const { box, points } = await horizonSamples();
+      const x = d3.scaleLinear().domain([box.x, box.x + box.width]).range([0, box.width]);
+      const y = d3.scaleLinear().domain([box.y, box.y + box.height]).range([0, box.height]);
+      return horizonCsv(points, x, y);
     }, fixture);
     const rows = csv.trim().split("\n").map(row => row.split(","));
     assert.equal(rows.length, 3025, "CSV contains each D3 data point plus a header");
@@ -66,6 +69,13 @@ async function main() {
     assert.equal(rows[1][2], "0.000000", "the first x point normalizes to 0");
     assert.equal(rows.at(-1)[2], "100.000000", "the last x point normalizes to 100");
     assert.ok(rows.every((row, index) => index === 0 || (Number(row[2]) >= 0 && Number(row[2]) <= 100 && Number(row[3]) >= 0 && Number(row[3]) <= 100)), "normalized CSV values stay within 0 to 100");
+    const reversedY = await page.evaluate(() => {
+      const x = d3.scaleLinear().domain([0, 10]).range([0, 10]);
+      const y = d3.scaleLinear().domain([0, 10]).range([10, 0]);
+      return horizonCsv([{ x: 0, y: 0 }, { x: 10, y: 10 }], x, y).split("\n").map(row => row.split(","));
+    });
+    assert.equal(reversedY[1][3], "100.000000", "a D3 point at the visual bottom normalizes to 100");
+    assert.equal(reversedY[2][3], "0.000000", "a D3 point at the visual top normalizes to 0");
 
     await page.click("#horizon");
     await page.waitForSelector(".swal2-popup #horizon-chart svg");

@@ -188,19 +188,24 @@ function normalized(value, minimum, maximum) {
   if (maximum === minimum) return "0";
   return (((value - minimum) / (maximum - minimum)) * 100).toFixed(6);
 }
-function horizonCsv(points) {
-  const definedY = points.map(point => point.y).filter(Number.isFinite);
-  const xValues = points.map(point => point.x);
+function horizonCsv(points, xScale, yScale) {
+  const projected = points.map(point => ({
+    point,
+    x: xScale(point.x),
+    y: Number.isFinite(point.y) ? yScale(point.y) : null
+  }));
+  const definedY = projected.map(point => point.y).filter(Number.isFinite);
+  const xValues = projected.map(point => point.x);
   const minX = Math.min(...xValues), maxX = Math.max(...xValues);
   const minY = Math.min(...definedY), maxY = Math.max(...definedY);
   const rows = ["x,y,x_normalized,y_normalized"];
-  for (const point of points) {
-    rows.push([point.x, point.y ?? "", normalized(point.x, minX, maxX), normalized(point.y, minY, maxY)].join(","));
+  for (const { point, x, y } of projected) {
+    rows.push([point.x, point.y ?? "", normalized(x, minX, maxX), normalized(y, minY, maxY)].join(","));
   }
   return rows.join("\n");
 }
-function downloadHorizonCsv(points) {
-  const url = URL.createObjectURL(new Blob([horizonCsv(points)], { type: "text/csv;charset=utf-8" }));
+function downloadHorizonCsv(points, scales) {
+  const url = URL.createObjectURL(new Blob([horizonCsv(points, scales.x, scales.y)], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = "horizon.csv";
@@ -236,6 +241,7 @@ function renderHorizonPlot({ box, points }) {
     .attr("text-anchor", "middle").text("skyline y (first filled pixel)");
   plot.append("path").datum(points).attr("fill", "none").attr("stroke", "#ff5d73").attr("stroke-width", 2.5)
     .attr("d", d3.line().defined(d => d.y !== null).x(d => x(d.x)).y(d => y(d.y)).curve(d3.curveStepAfter));
+  return { x, y };
 }
 
 /* ---- load ---- */
@@ -450,7 +456,7 @@ $("horizon").onclick = async () => {
       title: "Horizon",
       html: `<div class="hint" style="margin-bottom:10px;">每個 x 的最上方填色 y 值（${result.points.length} 個取樣點）</div><button id="download-horizon-csv" type="button">下載 CSV</button><div id="horizon-chart"></div>`,
       width: 900,
-      didOpen: () => { renderHorizonPlot(result); $("download-horizon-csv").onclick = () => downloadHorizonCsv(result.points); }
+      didOpen: () => { const scales = renderHorizonPlot(result); $("download-horizon-csv").onclick = () => downloadHorizonCsv(result.points, scales); }
     });
   } catch (error) {
     console.error(error);
