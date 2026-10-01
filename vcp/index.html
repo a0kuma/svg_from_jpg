@@ -184,10 +184,11 @@ async function horizonSamples() {
   }
   return { box, points, sampleWidth: width, sampleHeight: height };
 }
-function normalized(value, minimum, maximum) {
+function normalized(value, minimum, maximum, invert = false) {
   if (!Number.isFinite(value)) return "";
   if (maximum === minimum) return "0";
-  return (((value - minimum) / (maximum - minimum)) * 100).toFixed(6);
+  const fraction = (value - minimum) / (maximum - minimum);
+  return ((invert ? 1 - fraction : fraction) * 100).toFixed(6);
 }
 function horizonCsv(points, xScale, yScale) {
   const projected = points.map(point => ({
@@ -201,7 +202,8 @@ function horizonCsv(points, xScale, yScale) {
   const minY = Math.min(...definedY), maxY = Math.max(...definedY);
   const rows = ["x,y,x_normalized,y_normalized"];
   for (const { point, x, y } of projected) {
-    rows.push([point.x, point.y ?? "", normalized(x, minX, maxX), normalized(y, minY, maxY)].join(","));
+    // Screen y grows downward; CSV y follows ordinary graph coordinates, where upward is positive.
+    rows.push([point.x, point.y ?? "", normalized(x, minX, maxX), normalized(y, minY, maxY, true)].join(","));
   }
   return rows.join("\n");
 }

@@ -69,13 +69,18 @@ async function main() {
     assert.equal(rows[1][2], "0.000000", "the first x point normalizes to 0");
     assert.equal(rows.at(-1)[2], "100.000000", "the last x point normalizes to 100");
     assert.ok(rows.every((row, index) => index === 0 || (Number(row[2]) >= 0 && Number(row[2]) <= 100 && Number(row[3]) >= 0 && Number(row[3]) <= 100)), "normalized CSV values stay within 0 to 100");
+    const dataRows = rows.slice(1);
+    const visualTop = dataRows.reduce((top, row) => Number(row[1]) < Number(top[1]) ? row : top);
+    const visualBottom = dataRows.reduce((bottom, row) => Number(row[1]) > Number(bottom[1]) ? row : bottom);
+    assert.equal(visualTop[3], "100.000000", "the visual top is y=100 in conventional graph coordinates");
+    assert.equal(visualBottom[3], "0.000000", "the visual bottom is y=0 in conventional graph coordinates");
     const reversedY = await page.evaluate(() => {
       const x = d3.scaleLinear().domain([0, 10]).range([0, 10]);
       const y = d3.scaleLinear().domain([0, 10]).range([10, 0]);
       return horizonCsv([{ x: 0, y: 0 }, { x: 10, y: 10 }], x, y).split("\n").map(row => row.split(","));
     });
-    assert.equal(reversedY[1][3], "100.000000", "a D3 point at the visual bottom normalizes to 100");
-    assert.equal(reversedY[2][3], "0.000000", "a D3 point at the visual top normalizes to 0");
+    assert.equal(reversedY[1][3], "0.000000", "a D3 point at the visual bottom normalizes to 0");
+    assert.equal(reversedY[2][3], "100.000000", "a D3 point at the visual top normalizes to 100");
 
     await page.click("#horizon");
     await page.waitForSelector(".swal2-popup #horizon-chart .main-svg");
