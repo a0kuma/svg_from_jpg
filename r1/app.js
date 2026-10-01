@@ -585,7 +585,13 @@
     $("go").disabled = false;
     if (srcURL) URL.revokeObjectURL(srcURL);
     srcURL = URL.createObjectURL(f);
-    drop.innerHTML = `已選：${f.name}<br><span class="hint">${(f.size / 1024) | 0} KB</span>`;
+    drop.textContent = "";
+    const line1 = document.createElement("div");
+    line1.textContent = `已選：${f.name}`;
+    const line2 = document.createElement("span");
+    line2.className = "hint";
+    line2.textContent = `${(f.size / 1024) | 0} KB`;
+    drop.append(line1, line2);
     if (tab === "src") render();
   }
 
