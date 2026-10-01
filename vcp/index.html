@@ -125,7 +125,7 @@ function applyShade(startPct, endPct, hex, alpha) {
   }
 }
 
-/* ---- horizon: maximum filled y for every sampled x ---- */
+/* ---- horizon: first filled y (skyline) for every sampled x ---- */
 function filledGeometryClone() {
   const clone = lsvg.cloneNode(true);
   const originals = [...lsvg.querySelectorAll(GEOMS)];
@@ -173,11 +173,11 @@ async function horizonSamples() {
   const pixels = context.getImageData(0, 0, width, height).data;
   const points = [];
   for (let px = 0; px < width; px++) {
-    let py = height - 1;
-    while (py >= 0 && pixels[(py * width + px) * 4 + 3] === 0) py--;
+    let py = 0;
+    while (py < height && pixels[(py * width + px) * 4 + 3] === 0) py++;
     points.push({
       x: box.x + ((px + 0.5) / width) * box.width,
-      y: py < 0 ? null : box.y + ((py + 0.5) / height) * box.height
+      y: py === height ? null : box.y + ((py + 0.5) / height) * box.height
     });
   }
   return { box, points };
@@ -191,14 +191,14 @@ function renderHorizonPlot({ box, points }) {
   // SVG coordinates increase downward, so use the same direction in the chart.
   const y = d3.scaleLinear().domain([box.y, box.y + box.height]).range([0, innerH]);
   const svg = d3.select(root).append("svg").attr("viewBox", `0 0 ${width} ${height}`)
-    .attr("width", "100%").attr("role", "img").attr("aria-label", "Maximum filled y by x");
+    .attr("width", "100%").attr("role", "img").attr("aria-label", "Skyline y by x");
   const plot = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
   plot.append("g").attr("transform", `translate(0,${innerH})`).call(d3.axisBottom(x).ticks(8));
   plot.append("g").call(d3.axisLeft(y).ticks(6));
   plot.append("text").attr("x", innerW / 2).attr("y", innerH + 38).attr("fill", "#8b98a8")
     .attr("text-anchor", "middle").text("x (SVG units)");
   plot.append("text").attr("transform", "rotate(-90)").attr("x", -innerH / 2).attr("y", -46).attr("fill", "#8b98a8")
-    .attr("text-anchor", "middle").text("maximum filled y");
+    .attr("text-anchor", "middle").text("skyline y (first filled pixel)");
   plot.append("path").datum(points).attr("fill", "none").attr("stroke", "#4dd0e1").attr("stroke-width", 2)
     .attr("d", d3.line().defined(d => d.y !== null).x(d => x(d.x)).y(d => y(d.y)).curve(d3.curveStepAfter));
 }
@@ -411,7 +411,7 @@ $("horizon").onclick = async () => {
     if (!result.points.some(point => point.y !== null)) { Swal.fire("找不到有填色的圖形"); return; }
     await Swal.fire({
       title: "Horizon",
-      html: `<div class="hint" style="margin-bottom:10px;">每個 x 的最大片段填色 y 值（${result.points.length} 個取樣點）</div><div id="horizon-chart"></div>`,
+      html: `<div class="hint" style="margin-bottom:10px;">每個 x 的最上方填色 y 值（${result.points.length} 個取樣點）</div><div id="horizon-chart"></div>`,
       width: 900,
       didOpen: () => renderHorizonPlot(result)
     });

@@ -47,10 +47,12 @@ async function main() {
 
     assert.deepEqual(result.box, { x: 0, y: 0, width: 300, height: 400 });
     assert.equal(result.points.length, 300, "ex.svg is sampled once per x-unit");
-    assert.equal(result.points.filter(point => point.y !== null).length, 300, "ex.svg fills every x column");
-    for (const point of result.points) {
-      assert.ok(Math.abs(point.y - 399.5) < 0.01, "the maximum filled y reaches the bottom edge of ex.svg");
-    }
+    assert.equal(result.points.filter(point => point.y !== null).length, 300, "ex.svg has a skyline value for every x column");
+    const at20Percent = result.points[60].y;
+    const at70Percent = result.points[210].y;
+    assert.ok(Math.abs(at20Percent - 124.5) < 0.01, "20% x has the expected skyline y");
+    assert.ok(Math.abs(at70Percent - 95.5) < 0.01, "70% x has the expected skyline y");
+    assert.notEqual(at20Percent, at70Percent, "the real skyline varies across ex.svg");
 
     await page.click("#horizon");
     await page.waitForSelector(".swal2-popup #horizon-chart svg");
