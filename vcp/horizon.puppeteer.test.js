@@ -5,11 +5,7 @@ const path = require("node:path");
 const puppeteer = require("puppeteer-core");
 
 const repositoryRoot = path.resolve(__dirname, "..");
-const sampleSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
-  <path fill="#e55" d="M0 2H4V8H0Z"/>
-  <path fill="#5ae" d="M6 1H10V6H6Z"/>
-  <path fill="none" stroke="#fff" d="M4 9H6"/>
-</svg>`;
+const fixturePath = path.join(repositoryRoot, "ex.svg");
 
 function staticServer() {
   const server = createServer(async (request, response) => {
@@ -42,21 +38,24 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}/vcp/index.html`, { waitUntil: "networkidle0" });
     await page.waitForFunction(() => typeof window.d3 !== "undefined");
 
-    const points = await page.evaluate(async markup => {
+    const fixture = await readFile(fixturePath, "utf8");
+    const result = await page.evaluate(async markup => {
       loadSvgText(markup);
-      return (await horizonSamples()).points;
-    }, sampleSvg);
+      const { box, points } = await horizonSamples();
+      return { box: { x: box.x, y: box.y, width: box.width, height: box.height }, points };
+    }, fixture);
 
-    assert.equal(points.length, 10, "one sample is collected for each SVG x-unit");
-    for (const index of [0, 1, 2, 3]) assert.ok(Math.abs(points[index].y - 7.5) < 0.01);
-    assert.equal(points[4].y, null, "the unfilled gap has no horizon value");
-    assert.equal(points[5].y, null, "the stroke-only path is ignored");
-    for (const index of [6, 7, 8, 9]) assert.ok(Math.abs(points[index].y - 5.5) < 0.01);
+    assert.deepEqual(result.box, { x: 0, y: 0, width: 300, height: 400 });
+    assert.equal(result.points.length, 300, "ex.svg is sampled once per x-unit");
+    assert.equal(result.points.filter(point => point.y !== null).length, 300, "ex.svg fills every x column");
+    for (const point of result.points) {
+      assert.ok(Math.abs(point.y - 399.5) < 0.01, "the maximum filled y reaches the bottom edge of ex.svg");
+    }
 
     await page.click("#horizon");
     await page.waitForSelector(".swal2-popup #horizon-chart svg");
-    const chart = await page.$eval("#horizon-chart path", path => path.getAttribute("d"));
-    assert.ok(chart && chart.length > 0, "D3 renders a skyline path");
+    const chart = await page.$eval("#horizon-chart path", element => element.getAttribute("d"));
+    assert.ok(chart && chart.length > 0, "D3 renders ex.svg as a skyline path");
     assert.deepEqual(pageErrors, [], "the browser reported no runtime errors");
     console.log("Horizon Puppeteer test: OK");
   } finally {
