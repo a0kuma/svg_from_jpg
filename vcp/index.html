@@ -183,6 +183,32 @@ async function horizonSamples() {
   }
   return { box, points, sampleWidth: width, sampleHeight: height };
 }
+function normalized(value, minimum, maximum) {
+  if (!Number.isFinite(value)) return "";
+  if (maximum === minimum) return "0";
+  return (((value - minimum) / (maximum - minimum)) * 100).toFixed(6);
+}
+function horizonCsv(points) {
+  const definedY = points.map(point => point.y).filter(Number.isFinite);
+  const xValues = points.map(point => point.x);
+  const minX = Math.min(...xValues), maxX = Math.max(...xValues);
+  const minY = Math.min(...definedY), maxY = Math.max(...definedY);
+  const rows = ["x,y,x_normalized,y_normalized"];
+  for (const point of points) {
+    rows.push([point.x, point.y ?? "", normalized(point.x, minX, maxX), normalized(point.y, minY, maxY)].join(","));
+  }
+  return rows.join("\n");
+}
+function downloadHorizonCsv(points) {
+  const url = URL.createObjectURL(new Blob([horizonCsv(points)], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "horizon.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 function renderHorizonPlot({ box, points }) {
   const root = $("horizon-chart");
   const margin = { top: 20, right: 22, bottom: 46, left: 62 };
@@ -422,9 +448,9 @@ $("horizon").onclick = async () => {
     if (!result.points.some(point => point.y !== null)) { Swal.fire("找不到有填色的圖形"); return; }
     await Swal.fire({
       title: "Horizon",
-      html: `<div class="hint" style="margin-bottom:10px;">每個 x 的最上方填色 y 值（${result.points.length} 個取樣點）</div><div id="horizon-chart"></div>`,
+      html: `<div class="hint" style="margin-bottom:10px;">每個 x 的最上方填色 y 值（${result.points.length} 個取樣點）</div><button id="download-horizon-csv" type="button">下載 CSV</button><div id="horizon-chart"></div>`,
       width: 900,
-      didOpen: () => renderHorizonPlot(result)
+      didOpen: () => { renderHorizonPlot(result); $("download-horizon-csv").onclick = () => downloadHorizonCsv(result.points); }
     });
   } catch (error) {
     console.error(error);
