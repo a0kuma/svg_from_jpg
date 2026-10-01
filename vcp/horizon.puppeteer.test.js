@@ -56,8 +56,28 @@ async function main() {
     assert.ok(Math.abs(at70Percent - 94.99008) < 0.01, "70% x has the expected skyline y");
     assert.notEqual(at20Percent, at70Percent, "the real skyline varies across ex.svg");
 
+    const csv = await page.evaluate(async markup => {
+      loadSvgText(markup);
+      return horizonCsv((await horizonSamples()).points);
+    }, fixture);
+    const rows = csv.trim().split("\n").map(row => row.split(","));
+    assert.equal(rows.length, 3025, "CSV contains each D3 data point plus a header");
+    assert.deepEqual(rows[0], ["x", "y", "x_normalized", "y_normalized"]);
+    assert.equal(rows[1][2], "0.000000", "the first x point normalizes to 0");
+    assert.equal(rows.at(-1)[2], "100.000000", "the last x point normalizes to 100");
+    assert.ok(rows.every((row, index) => index === 0 || (Number(row[2]) >= 0 && Number(row[2]) <= 100 && Number(row[3]) >= 0 && Number(row[3]) <= 100)), "normalized CSV values stay within 0 to 100");
+
     await page.click("#horizon");
     await page.waitForSelector(".swal2-popup #horizon-chart svg");
+    await page.waitForSelector("#download-horizon-csv");
+    await page.evaluate(() => {
+      window.horizonDownload = null;
+      HTMLAnchorElement.prototype.click = function() { window.horizonDownload = { href: this.href, name: this.download }; };
+    });
+    await page.click("#download-horizon-csv");
+    const download = await page.evaluate(() => window.horizonDownload);
+    assert.equal(download.name, "horizon.csv", "the CSV button requests the Horizon filename");
+    assert.ok(download.href.startsWith("blob:"), "the CSV button creates a downloadable blob");
     const chart = await page.$eval("#horizon-chart path", element => element.getAttribute("d"));
     assert.ok(chart && chart.length > 0, "D3 renders ex.svg as a skyline path");
     const background = await page.$eval("#horizon-chart image.horizon-source", element => element.getAttribute("href"));
