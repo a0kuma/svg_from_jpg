@@ -76,18 +76,18 @@ async function main() {
     }, TOPS, BLOCK);
     assert.deepEqual(staircaseSegments, [], "every vertical step is a discontinuity — 20px and 130px alike — so nothing is sloped");
 
-    // every plateau that is the higher side of an ascending flat–flat step is
-    // highlighted (not just the global tallest) — i.e. all blocks except the
-    // single lowest (top=370).
+    // a monotonic staircase has exactly one local-maximum plateau (the top): an
+    // intermediate block has a HIGHER block to its right, so it is not a peak and
+    // is not highlighted.
     const highlights = await page.evaluate((tops, block) => {
       const points = [];
       tops.forEach(top => { for (let k = 0; k < block; k++) points.push({ x: points.length, y: top }); });
       const { regions } = horizonRegions(points, { window: 4, flatEps: 0.1, jumpMax: 6 });
       return flatHighlights(regions).map(h => h.y).sort((a, b) => a - b);
     }, TOPS, BLOCK);
-    assert.deepEqual(highlights, [50, 70, 200, 220, 350], "every plateau above the lowest is highlighted, not only the tallest");
+    assert.deepEqual(highlights, [50], "only the peak (top=50) is highlighted; blocks with a higher neighbour are not");
 
-    // ---- 2. live DOM: steps give no slope bands; all-but-lowest plateaus lit --
+    // ---- 2. live DOM: steps give no slope bands; only the peak plateau lit ----
     await page.evaluate(markup => loadSvgText(markup), stairSvg);
     await page.click("#slopeband");
     await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
@@ -97,9 +97,10 @@ async function main() {
     }));
     const litStair = pct => stair.flat.some(b => pct >= b.left && pct <= b.left + b.width);
     assert.equal(stair.slope, 0, "a staircase of five 90° steps produces no slope bands");
-    assert.equal(stair.flat.length, 5, "all plateaus except the lowest are highlighted");
-    assert.ok(!litStair((25 / 300) * 100), "the lowest block (~8%) is not highlighted");
+    assert.equal(stair.flat.length, 1, "only the peak plateau is highlighted");
     assert.ok(litStair((275 / 300) * 100), "the tallest block (~92%) is highlighted");
+    assert.ok(!litStair((175 / 300) * 100), "an intermediate block (~58%) is NOT highlighted — it has a higher neighbour");
+    assert.ok(!litStair((25 / 300) * 100), "the lowest block (~8%) is not highlighted");
 
     // ---- 3. the classifier still marks a real slope -------------------------
     await page.evaluate(markup => loadSvgText(markup), rampSvg);

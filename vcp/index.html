@@ -223,17 +223,19 @@ function horizonRegions(points, options = {}) {
   if (cur !== null) close(klass.length - 1);
   return { regions, last };
 }
-/* Every plateau that sits on the upper (higher) side of a flat–flat 90° step.
-   Two plateaus adjacent in the region list are separated only by a step/gap, so
-   a LOWER flat neighbour (larger screen-y) means this plateau is the taller side
-   of a step. Higher = topmost skyline = smaller screen-y (y grows downward);
-   flip the comparison to pick lower sides instead. Returns ALL such plateaus,
-   not just the global highest. */
+/* Every plateau that is a LOCAL MAXIMUM across its flat–flat 90° steps: higher
+   than at least one adjacent flat plateau and lower than none. Adjacent flat
+   regions are separated only by a step edge; "higher" = topmost skyline = smaller
+   screen-y (y grows downward). A plateau that has a higher flat neighbour is not
+   the peak at that step, so it is NOT coloured — but every separate peak is, not
+   just the single global highest. (Flip both comparisons to pick valleys.) */
 function flatHighlights(regions) {
   return regions.filter((r, i) => {
     if (r.type !== "flat") return false;
     const neighbours = [regions[i - 1], regions[i + 1]].filter(nb => nb && nb.type === "flat");
-    return neighbours.some(nb => nb.y > r.y);       // a lower flat across the step ⇒ r is the higher side
+    const higherThanSome = neighbours.some(nb => nb.y > r.y);   // a lower flat across a step ⇒ r is the higher side here
+    const lowerThanSome = neighbours.some(nb => nb.y < r.y);    // a higher flat across a step ⇒ r is NOT the peak
+    return higherThanSome && !lowerThanSome;
   });
 }
 function bandColor(i) {

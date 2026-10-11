@@ -6,6 +6,7 @@
     "test:horizon": "node vcp/horizon.puppeteer.test.js",
     "test:horizon-slope": "node vcp/horizon-slope.puppeteer.test.js",
     "test:horizon-slope-steps": "node vcp/horizon-slope-step-heights.puppeteer.test.js",
-    "test:horizon-slope-narrow": "node vcp/horizon-slope-narrow-plateau.puppeteer.test.js"
+    "test:horizon-slope-narrow": "node vcp/horizon-slope-narrow-plateau.puppeteer.test.js",
+    "test:horizon-slope-peak": "node vcp/horizon-slope-peak-only.puppeteer.test.js"
   }
 }
