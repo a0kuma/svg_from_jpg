@@ -245,7 +245,22 @@ function horizonRegions(points, options = {}) {
     if (paint && cur === null) { cur = k; start = i; }
   }
   if (cur !== null) close(klass.length - 1);
-  return { regions, last };
+  // A real slope is a DISTRIBUTED change — a rasterised ramp made of many small
+  // steps. A "slope" whose entire change is a SINGLE jump is just one vertical
+  // discontinuity that the window smeared across ±window (e.g. one alloc/free on
+  // a memory-timeline plot). Require ≥2 steps, else drop it (not a slope band);
+  // the two flats it separated then become neighbours for peak detection. */
+  const slopeJumpEps = options.slopeJumpEps ?? 0.5;   // |Δy| above this counts as a step
+  const painted = regions.filter(r => {
+    if (r.type !== "slope") return true;
+    let jumps = 0;
+    for (let k = r.startIndex; k < r.endIndex; k++) {
+      const a = points[k].y, b = points[k + 1].y;
+      if (Number.isFinite(a) && Number.isFinite(b) && Math.abs(b - a) > slopeJumpEps) jumps++;
+    }
+    return jumps >= 2;
+  });
+  return { regions: painted, last };
 }
 /* Every plateau that is a LOCAL MAXIMUM across its flat–flat 90° steps: higher
    than at least one adjacent flat plateau and lower than none. Adjacent flat
