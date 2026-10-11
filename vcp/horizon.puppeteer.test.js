@@ -13,11 +13,13 @@ function staticServer() {
       const requestPath = new URL(request.url, "http://localhost").pathname;
       const filename = path.resolve(repositoryRoot, `.${requestPath}`);
       if (!filename.startsWith(`${repositoryRoot}${path.sep}`)) throw new Error("outside repository");
+      const body = await readFile(filename);                       // read BEFORE writing the header
       const type = filename.endsWith(".html") ? "text/html; charset=utf-8" : "application/octet-stream";
       response.writeHead(200, { "content-type": type });
-      response.end(await readFile(filename));
+      response.end(body);
     } catch (_) {
-      response.writeHead(404).end();
+      if (!response.headersSent) response.writeHead(404);
+      response.end();
     }
   });
   return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(server)));

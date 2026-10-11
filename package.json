@@ -3,6 +3,7 @@
     "puppeteer-core": "^24.43.1"
   },
   "scripts": {
-    "test:horizon": "node vcp/horizon.puppeteer.test.js"
+    "test:horizon": "node vcp/horizon.puppeteer.test.js",
+    "test:horizon-slope": "node vcp/horizon-slope.puppeteer.test.js"
   }
 }
