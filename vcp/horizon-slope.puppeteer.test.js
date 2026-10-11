@@ -43,43 +43,56 @@ async function main() {
     // ---- 1. pure segmentation logic on synthetic skylines --------------------
     const segments = await page.evaluate(() => {
       const mk = ys => ys.map((y, i) => ({ x: i, y }));
+      const pair = s => s.map(g => [g.startIndex, g.endIndex]);
+      const opts = { window: 1, flatEps: 0.01, steepMax: 10 };
       return {
-        flat: horizonSlopeSegments(mk([5, 5, 5, 5, 5])),
-        oneRun: horizonSlopeSegments(mk([0, 0, 1, 2, 2])),
-        twoRuns: horizonSlopeSegments(mk([0, 1, 1, 2])),
-        gap: horizonSlopeSegments(mk([0, 1, null, 2, 3])),
-        trailing: horizonSlopeSegments(mk([0, 0, 1, 2])),
+        flat: horizonSlopeSegments(mk([5, 5, 5, 5, 5]), opts),
+        ramp: pair(horizonSlopeSegments(mk([0, 1, 2, 3, 4, 5]), opts)),
+        staircase: pair(horizonSlopeSegments(mk([0, 0, 0, 1, 1, 1, 2, 2, 2]), { ...opts, window: 2 })),
+        staircaseForward: pair(horizonSlopeSegments(mk([0, 0, 0, 1, 1, 1, 2, 2, 2]), { ...opts, window: 1 })),
+        cliff: horizonSlopeSegments(mk([0, 0, 0, 50, 50, 50]), opts),
+        cliffBetweenSlopes: pair(horizonSlopeSegments(mk([0, 1, 2, 50, 51, 52]), opts)),
+        gap: pair(horizonSlopeSegments(mk([0, 1, 2, null, 4, 5, 6]), opts)),
         colors: [0, 1, 2].map(bandColor)
       };
     });
 
     assert.deepEqual(segments.flat, [], "a perfectly flat skyline yields 0 bands");
+    assert.deepEqual(segments.ramp, [[0, 5]], "a constant slope is one unbroken band");
 
-    assert.equal(segments.oneRun.length, 1, "a single rise→fall is one non-flat run");
-    assert.deepEqual(
-      { s: segments.oneRun[0].startIndex, e: segments.oneRun[0].endIndex },
-      { s: 1, e: 3 }, "the run spans exactly the non-flat indices");
-    assert.equal(segments.oneRun[0].startPct, 25, "startIndex 1 of 4 → 25%");
-    assert.equal(segments.oneRun[0].endPct, 75, "endIndex 3 of 4 → 75%");
+    // the RIGHT-circle case: a rasterised diagonal (flat tread + step, repeating)
+    // must read as ONE segment, not fragment into a band per step.
+    assert.deepEqual(segments.staircase, [[1, 7]], "a windowed slope merges the staircase into one band");
+    assert.ok(segments.staircaseForward.length > 1, "a naive per-step read would fragment the same staircase");
 
-    assert.equal(segments.twoRuns.length, 2, "a flat step between two slopes splits into 2 bands");
-    assert.ok(segments.twoRuns[0].endPct <= segments.twoRuns[1].startPct, "bands do not overlap");
+    // the LEFT-circle case: a near-vertical step is a discontinuity, never marked.
+    assert.deepEqual(segments.cliff, [], "a lone vertical jump is a discontinuity, not a band");
+    assert.deepEqual(segments.cliffBetweenSlopes, [[0, 1], [4, 5]], "a jump splits two slopes and is left unmarked");
 
-    assert.equal(segments.gap.length, 2, "a null (no-pixel) gap breaks the run in two");
-    assert.deepEqual(
-      segments.gap.map(s => [s.startIndex, s.endIndex]),
-      [[0, 1], [3, 4]], "the gap at index 2 is excluded from every band");
-
-    assert.equal(segments.trailing.length, 1, "a run reaching the last sample is closed");
-    assert.equal(segments.trailing[0].endPct, 100, "the trailing run ends at 100%");
+    assert.deepEqual(segments.gap, [[0, 1], [5, 6]], "a null (no-pixel) gap breaks the run and is unmarked");
 
     assert.equal(new Set(segments.colors).size, 3, "each band index gets a distinct colour");
     assert.ok(segments.colors.every(c => c.startsWith("hsla(")), "colours are hsla() strings");
 
-    // ---- 2. live DOM rendering over the real ex.svg skyline ------------------
+    // ---- 2. clean geometric SVG: flat → vertical step → diagonal → flat -------
+    // mirrors the reported screenshot: the step must stay unmarked, the diagonal
+    // must be a single band.
+    const stepSlopeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><polygon points="0,200 100,200 100,100 150,100 250,250 300,250 300,400 0,400" fill="#c9c4bd"/></svg>`;
+    await page.evaluate(markup => loadSvgText(markup), stepSlopeSvg);
+    await page.click("#slopeband");
+    await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
+    const clean = await page.evaluate(() => [...document.querySelectorAll("#lbands > div")]
+      .map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) })));
+
+    assert.equal(clean.length, 1, "the diagonal yields exactly one band");
+    const band = clean[0], right = band.left + band.width;
+    assert.ok(band.left > 40 && band.left < 55, "the band starts at the diagonal (~50%), not the flat top");
+    assert.ok(right > 80 && right < 90, "the band ends where the diagonal does (~83%)");
+    assert.ok(!(33 >= band.left && 33 <= right), "the vertical step (~33%) is outside the band — the discontinuity is unmarked");
+
+    // ---- 3. live DOM rendering over the real ex.svg skyline ------------------
     const fixture = await readFile(fixturePath, "utf8");
     await page.evaluate(markup => loadSvgText(markup), fixture);
-
     await page.click("#slopeband");
     await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
     const bands = await page.evaluate(() => {
@@ -89,7 +102,8 @@ async function main() {
       return { left: read("lbands"), right: read("rbands") };
     });
 
-    assert.ok(bands.left.length > 1, "ex.svg's varied skyline produces multiple bands");
+    assert.ok(bands.left.length > 0, "ex.svg's varied skyline produces bands");
+    assert.ok(bands.left.length < 431, "windowing + discontinuity exclusion beats the naive per-pixel partition");
     assert.equal(bands.left.length, bands.right.length, "both panels show the same bands");
     assert.ok(bands.left.every(b => b.left >= 0 && b.left + b.width <= 100.0001), "bands stay within 0~100%");
     assert.ok(bands.left.every(b => b.width > 0), "every band has a positive width");
@@ -97,7 +111,7 @@ async function main() {
     const lefts = bands.left.map(b => b.left);
     assert.deepEqual(lefts, [...lefts].sort((a, b) => a - b), "bands are laid out left→right");
 
-    // ---- 3. a second click clears the bands ---------------------------------
+    // ---- 4. a second click clears the bands ---------------------------------
     await page.click("#slopeband");
     const cleared = await page.evaluate(() => ({
       left: document.querySelector("#lbands").childElementCount,
