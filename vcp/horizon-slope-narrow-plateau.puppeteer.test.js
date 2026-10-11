@@ -1,16 +1,10 @@
-// Reproduces the reported case (Screenshot_20261012_020159): two higher
-// plateaus each sit on the upper side of a flat–flat 90° step, but only one is
-// highlighted.
-//
-//   right circle (OK):  a WIDE higher plateau → highlighted.
-//   left circle (NOT):  a NARROW higher plateau → no highlight.
-//
-// Why: a plateau narrower than ~2·window has every column within `window` of
-// one of its two bounding jumps, so every column classifies as "step" and the
-// peak never becomes a "flat" region — it cannot be highlighted. A wide peak
-// has interior columns far from both edges, forms a flat region, and is
-// highlighted. This test pins that width-dependent miss (the repro, not the
-// desired behaviour — both peaks are genuine higher plateaus at 90° steps).
+// Regression for the reported case (Screenshot_20261012_020159): two higher
+// plateaus each sit on the upper side of a flat–flat 90° step — a WIDE one and
+// a NARROW one. Before the fix only the wide one was highlighted, because a
+// plateau narrower than ~2·window had every column swallowed into a "step"
+// class and never became a "flat" region. Now a step is a zero-width edge and
+// each column's slope window is clipped at step edges, so even a 1-column
+// plateau reads as flat — BOTH peaks are highlighted.
 const assert = require("node:assert/strict");
 const { createServer } = require("node:http");
 const { readFile } = require("node:fs/promises");
@@ -60,7 +54,7 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}/vcp/index.html`, { waitUntil: "networkidle0" });
     await page.waitForFunction(() => typeof window.d3 !== "undefined" && typeof window.Plotly !== "undefined");
 
-    // ---- 1. pure function: the narrow peak never becomes a flat region --------
+    // ---- 1. pure function: BOTH peaks form flat regions and are highlighted ---
     const pure = await page.evaluate(() => {
       const skyline = [];
       const push = (n, y) => { for (let k = 0; k < n; k++) skyline.push({ x: skyline.length, y }); };
@@ -68,21 +62,21 @@ async function main() {
       const opts = { window: 4, flatEps: 0.1, jumpMax: 6 };
       const { regions } = horizonRegions(skyline, opts);
       const flats = regions.filter(r => r.type === "flat").map(r => ({ y: r.y, startIndex: r.startIndex, endIndex: r.endIndex }));
-      const highlights = flatHighlights(regions).map(r => ({ y: r.y, startIndex: r.startIndex }));
+      const highlights = flatHighlights(regions).map(r => ({ y: r.y, startIndex: r.startIndex })).sort((a, b) => a.startIndex - b.startIndex);
       return { flats, highlights };
     });
 
-    // a flat region exists for the wide peak (y=120), but NONE covers the narrow peak (cols 50–55)
+    // both peaks (y=120) are now genuine flat regions — the narrow one (cols
+    // 50–55) as well as the wide one (cols 110–159).
     assert.ok(pure.flats.some(f => f.y === 120 && f.startIndex > 100), "the wide peak forms a flat region");
-    assert.ok(!pure.flats.some(f => f.y === 120 && f.startIndex < 60), "the narrow peak never becomes a flat region — it is swallowed as 'step'");
+    assert.ok(pure.flats.some(f => f.y === 120 && f.startIndex < 60), "the narrow peak now forms a flat region too (clipped window)");
 
-    // so only the wide peak is highlighted; the narrow peak (a genuine higher
-    // plateau at a 90° step) is missed.
-    assert.equal(pure.highlights.length, 1, "exactly one plateau is highlighted");
-    assert.equal(pure.highlights[0].y, 120, "the highlight is a y=120 peak");
-    assert.ok(pure.highlights[0].startIndex > 100, "...the WIDE peak, not the narrow one");
+    // both higher plateaus are highlighted.
+    assert.equal(pure.highlights.length, 2, "both peaks are highlighted");
+    assert.deepEqual(pure.highlights.map(h => h.y), [120, 120], "both highlights are y=120 peaks");
+    assert.ok(pure.highlights[0].startIndex < 60 && pure.highlights[1].startIndex > 100, "one narrow peak, one wide peak");
 
-    // ---- 2. live DOM: wide peak lit, narrow peak dark ------------------------
+    // ---- 2. live DOM: both peaks lit ----------------------------------------
     await page.evaluate(markup => loadSvgText(markup), narrowSlopeSvg);
     await page.click("#slopeband");
     await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
@@ -93,12 +87,12 @@ async function main() {
     const lit = pct => dom.flat.some(b => pct >= b.left && pct <= b.left + b.width);
 
     assert.equal(dom.slope, 0, "pure vertical steps give no slope bands");
-    assert.equal(dom.flat.length, 1, "only one plateau is highlighted");
-    assert.ok(lit(WIDE_PCT), "the WIDE peak (~45%) is highlighted — right circle, OK");
-    assert.ok(!lit(NARROW_PCT), "the NARROW peak (~17.7%) is NOT highlighted — left circle, the reported issue");
+    assert.equal(dom.flat.length, 2, "both plateaus are highlighted");
+    assert.ok(lit(WIDE_PCT), "the WIDE peak (~45%) is highlighted — right circle");
+    assert.ok(lit(NARROW_PCT), "the NARROW peak (~17.7%) is highlighted too — left circle, now fixed");
 
     assert.deepEqual(pageErrors, [], "the browser reported no runtime errors");
-    console.log("Horizon narrow-plateau repro: OK (wide peak highlighted, narrow peak missed)");
+    console.log("Horizon narrow-plateau regression: OK (both wide and narrow peaks highlighted)");
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));

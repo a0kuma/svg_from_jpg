@@ -139,43 +139,37 @@ function applyShade(startPct, endPct, hex, alpha) {
 }
 
 /* ---- slope / flat bands over the horizon skyline ------------------------
-   Each column is classified from a windowed slope ∂y/∂x and the largest
-   single-column jump |Δy|/Δx within that window:
-     • "step"  — a single-column jump > jumpMax: a vertical 90° edge
-                 (discontinuity) at ANY height. Never coloured; separates
-                 regions.
-     • "slope" — genuinely sloped (|slope| > flatEps) with no step in the
-                 window. The window spans a rasterised staircase, so a diagonal
-                 reads as ONE region. Coloured AND gridded.
-     • "flat"  — zero slope (a plateau).
-     • "gap"   — no filled pixel; separates regions.
-   Steps/gaps break runs, so every coloured region is uniformly one kind. The
-   highlight picks the single highest plateau that sits on the upper side of a
-   flat–flat step (see highestFlatHighlight). */
+   A vertical 90° edge is a zero-WIDTH step between two columns, not a column:
+   stepAfter[k] marks a single-column jump |Δy|/Δx > jumpMax between column k and
+   k+1 (a discontinuity, at ANY height). Every column is then "flat" or "slope"
+   from its LOCAL slope — a windowed ∂y/∂x whose window is CLIPPED so it never
+   crosses a step edge or a gap. Clipping is what lets even a 1-column plateau
+   between two steps read as flat (the window can't reach across the steps to
+   inflate its slope), while a diagonal — having no steps inside its window —
+   still merges into one sloped region. Regions break at every step edge, so two
+   abutting plateaus at a 90° step are separate regions with no column lost to a
+   "step" class. */
 function horizonColumnClasses(points, options = {}) {
   const n = points.length, last = n - 1;
   const window = Math.max(1, options.window ?? Math.min(20, Math.max(4, Math.round(n * 0.004))));
   const flatEps = options.flatEps ?? 0.1;           // |slope| ≤ this ⇒ flat (also swallows ±1px raster jitter)
-  const jumpMax = options.jumpMax ?? 6;             // a single-column rise above this ⇒ vertical step
+  const jumpMax = options.jumpMax ?? 6;             // a single-column rise above this ⇒ vertical step edge
+  const stepAfter = new Array(n).fill(false);       // step edge between column k and k+1
+  for (let k = 0; k < last; k++) {
+    const y0 = points[k].y, y1 = points[k + 1].y;
+    if (Number.isFinite(y0) && Number.isFinite(y1) && Math.abs(y1 - y0) / (points[k + 1].x - points[k].x) > jumpMax) stepAfter[k] = true;
+  }
   const slope = new Array(n).fill(null);
   const klass = new Array(n).fill("gap");
   for (let i = 0; i < n; i++) {
     if (!Number.isFinite(points[i].y)) { klass[i] = "gap"; continue; }
-    const lo = Math.max(0, i - window), hi = Math.min(last, i + window);
-    const a = points[lo], b = points[hi];
-    if (Number.isFinite(a.y) && Number.isFinite(b.y) && b.x !== a.x) slope[i] = (b.y - a.y) / (b.x - a.x);
-    let worst = 0, broken = false;
-    for (let k = lo; k < hi; k++) {
-      const y0 = points[k].y, y1 = points[k + 1].y;
-      if (!Number.isFinite(y0) || !Number.isFinite(y1)) { broken = true; break; }
-      worst = Math.max(worst, Math.abs(y1 - y0) / (points[k + 1].x - points[k].x));
-    }
-    if (broken) klass[i] = "gap";
-    else if (worst > jumpMax) klass[i] = "step";
-    else if (slope[i] !== null && Math.abs(slope[i]) > flatEps) klass[i] = "slope";
-    else klass[i] = "flat";
+    let lo = i, hi = i;                              // widen symmetrically, stopping at step edges / gaps
+    for (let s = 0; s < window && lo > 0 && !stepAfter[lo - 1] && Number.isFinite(points[lo - 1].y); s++) lo--;
+    for (let s = 0; s < window && hi < last && !stepAfter[hi] && Number.isFinite(points[hi + 1].y); s++) hi++;
+    slope[i] = (hi > lo && points[hi].x !== points[lo].x) ? (points[hi].y - points[lo].y) / (points[hi].x - points[lo].x) : 0;
+    klass[i] = Math.abs(slope[i]) > flatEps ? "slope" : "flat";
   }
-  return { klass, slope, last };
+  return { klass, slope, stepAfter, last };
 }
 function segmentFromRun(start, end, last) {
   return {
@@ -183,48 +177,50 @@ function segmentFromRun(start, end, last) {
     startPct: (start / last) * 100, endPct: Math.min(100, ((end + 1) / last) * 100)
   };
 }
-function runsOfClass(klass, want, last) {
+function runsOfClass(klass, want, last, stepAfter) {
   const runs = []; let start = null;
   for (let i = 0; i < klass.length; i++) {
-    if (klass[i] === want) { if (start === null) start = i; }
-    else if (start !== null) { runs.push(segmentFromRun(start, i - 1, last)); start = null; }
+    if (start !== null && (klass[i] !== want || (stepAfter && stepAfter[i - 1]))) { runs.push(segmentFromRun(start, i - 1, last)); start = null; }
+    if (klass[i] === want && start === null) start = i;
   }
   if (start !== null) runs.push(segmentFromRun(start, last, last));
   return runs;
 }
 // sloped regions (coloured + gridded)
 function horizonSlopeSegments(points, options = {}) {
-  const { klass, last } = horizonColumnClasses(points, options);
+  const { klass, stepAfter, last } = horizonColumnClasses(points, options);
   if (last < 1) return [];
-  return runsOfClass(klass, "slope", last);
+  return runsOfClass(klass, "slope", last, stepAfter);
 }
 // flat plateaus, each tagged with a representative skyline y
 function horizonFlatSegments(points, options = {}) {
-  const { klass, last } = horizonColumnClasses(points, options);
+  const { klass, stepAfter, last } = horizonColumnClasses(points, options);
   if (last < 1) return [];
-  return runsOfClass(klass, "flat", last).map(seg => {
+  return runsOfClass(klass, "flat", last, stepAfter).map(seg => {
     seg.y = points[Math.floor((seg.startIndex + seg.endIndex) / 2)].y;
     return seg;
   });
 }
-// ordered list of coloured regions (flat|slope), used to find flat–flat steps
+// ordered list of coloured regions (flat|slope); regions break at every step edge
 function horizonRegions(points, options = {}) {
-  const { klass, last } = horizonColumnClasses(points, options);
+  const { klass, stepAfter, last } = horizonColumnClasses(points, options);
   const regions = [];
   let start = null, cur = null;
-  for (let i = 0; i <= klass.length; i++) {
-    const k = i < klass.length ? klass[i] : null;
+  const close = end => {
+    const seg = segmentFromRun(start, end, last);
+    seg.type = cur;
+    if (cur === "flat") seg.y = points[Math.floor((start + end) / 2)].y;
+    regions.push(seg);
+    start = null; cur = null;
+  };
+  for (let i = 0; i < klass.length; i++) {
+    const k = klass[i];
     const paint = k === "flat" || k === "slope";
-    if (paint && k === cur) continue;
-    if (cur !== null) {
-      const seg = segmentFromRun(start, i - 1, last);
-      seg.type = cur;
-      if (cur === "flat") seg.y = points[Math.floor((start + (i - 1)) / 2)].y;
-      regions.push(seg);
-    }
-    cur = paint ? k : null;
-    if (paint) start = i;
+    const edge = i > 0 && stepAfter[i - 1];
+    if (cur !== null && (k !== cur || edge)) close(i - 1);
+    if (paint && cur === null) { cur = k; start = i; }
   }
+  if (cur !== null) close(klass.length - 1);
   return { regions, last };
 }
 /* Every plateau that sits on the upper (higher) side of a flat–flat 90° step.
