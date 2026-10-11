@@ -30,6 +30,11 @@
   .vshade { position:absolute; top:0; height:100%; display:none; pointer-events:none; z-index:1; }
   .vbands { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
   .vbands > div { position:absolute; top:0; height:100%; }
+  .vbands > div.slope {           /* sloped regions get a grid overlay on top of the fill */
+    background-image:
+      repeating-linear-gradient(to right, rgba(255,255,255,.45) 0 1px, transparent 1px 14px),
+      repeating-linear-gradient(to bottom, rgba(255,255,255,.45) 0 1px, transparent 1px 14px);
+  }
   #cv { cursor:crosshair; }
   .side.panning, .side.panning #cv { cursor:grabbing; }
   #right .wrap { background:#0b0e12; box-shadow:inset 0 0 0 1px var(--line); }
@@ -133,79 +138,129 @@ function applyShade(startPct, endPct, hex, alpha) {
   }
 }
 
-/* ---- slope bands: cut the horizon skyline into maximal runs that are NOT
-   flat, and paint each run as its own vertical colour band. Each column is
-   classified from two per-column measures, which together separate the three
-   things that look alike in a pixel skyline:
-     • a *windowed* slope ∂y/∂x — a sloped edge rasterises to a staircase (flat
-       tread + 1px step, repeating), so the window spans several treads and the
-       whole diagonal reads as ONE slope instead of fragmenting band-per-step;
-     • the largest *single-column* jump |Δy|/Δx in that window — a real slope
-       spreads its rise over many small per-column steps, but a vertical 90°
-       edge concentrates the WHOLE rise into one column. Any single-column jump
-       above `jumpMax` is a discontinuity and is left unmarked — regardless of
-       the step's height, so a short step and a tall step are treated alike.
-   So a column is marked only when it is genuinely sloped AND nothing in its
-   window is a vertical step; every segment is uniformly flat/step (unmarked) or
-   uniformly sloped (marked), and the number of bands is 0..N. */
-function horizonSlopeSegments(points, options = {}) {
+/* ---- slope / flat bands over the horizon skyline ------------------------
+   Each column is classified from a windowed slope ∂y/∂x and the largest
+   single-column jump |Δy|/Δx within that window:
+     • "step"  — a single-column jump > jumpMax: a vertical 90° edge
+                 (discontinuity) at ANY height. Never coloured; separates
+                 regions.
+     • "slope" — genuinely sloped (|slope| > flatEps) with no step in the
+                 window. The window spans a rasterised staircase, so a diagonal
+                 reads as ONE region. Coloured AND gridded.
+     • "flat"  — zero slope (a plateau).
+     • "gap"   — no filled pixel; separates regions.
+   Steps/gaps break runs, so every coloured region is uniformly one kind. The
+   highlight picks the single highest plateau that sits on the upper side of a
+   flat–flat step (see highestFlatHighlight). */
+function horizonColumnClasses(points, options = {}) {
   const n = points.length, last = n - 1;
-  if (last < 1) return [];
   const window = Math.max(1, options.window ?? Math.min(20, Math.max(4, Math.round(n * 0.004))));
   const flatEps = options.flatEps ?? 0.1;           // |slope| ≤ this ⇒ flat (also swallows ±1px raster jitter)
-  const jumpMax = options.jumpMax ?? 6;             // a single-column rise above this ⇒ vertical step, never marked
-
-  const slope = new Array(n).fill(null);            // windowed slope per column; null where undefined
-  const jump = new Array(n).fill(0);               // largest single-column rise within the window
+  const jumpMax = options.jumpMax ?? 6;             // a single-column rise above this ⇒ vertical step
+  const slope = new Array(n).fill(null);
+  const klass = new Array(n).fill("gap");
   for (let i = 0; i < n; i++) {
-    if (!Number.isFinite(points[i].y)) { jump[i] = Infinity; continue; }
+    if (!Number.isFinite(points[i].y)) { klass[i] = "gap"; continue; }
     const lo = Math.max(0, i - window), hi = Math.min(last, i + window);
     const a = points[lo], b = points[hi];
     if (Number.isFinite(a.y) && Number.isFinite(b.y) && b.x !== a.x) slope[i] = (b.y - a.y) / (b.x - a.x);
-    let worst = 0;
+    let worst = 0, broken = false;
     for (let k = lo; k < hi; k++) {
       const y0 = points[k].y, y1 = points[k + 1].y;
-      if (!Number.isFinite(y0) || !Number.isFinite(y1)) { worst = Infinity; break; }   // a gap counts as a break
+      if (!Number.isFinite(y0) || !Number.isFinite(y1)) { broken = true; break; }
       worst = Math.max(worst, Math.abs(y1 - y0) / (points[k + 1].x - points[k].x));
     }
-    jump[i] = worst;
+    if (broken) klass[i] = "gap";
+    else if (worst > jumpMax) klass[i] = "step";
+    else if (slope[i] !== null && Math.abs(slope[i]) > flatEps) klass[i] = "slope";
+    else klass[i] = "flat";
   }
-  const isSloped = i => slope[i] !== null && jump[i] <= jumpMax && Math.abs(slope[i]) > flatEps;
-
-  const segments = [];
-  let start = null;
-  const close = end => {
-    segments.push({
-      startIndex: start, endIndex: end,
-      startPct: (start / last) * 100, endPct: Math.min(100, ((end + 1) / last) * 100)
-    });
-    start = null;
+  return { klass, slope, last };
+}
+function segmentFromRun(start, end, last) {
+  return {
+    startIndex: start, endIndex: end,
+    startPct: (start / last) * 100, endPct: Math.min(100, ((end + 1) / last) * 100)
   };
-  for (let i = 0; i < n; i++) {
-    if (isSloped(i)) { if (start === null) start = i; }
-    else if (start !== null) close(i - 1);
+}
+function runsOfClass(klass, want, last) {
+  const runs = []; let start = null;
+  for (let i = 0; i < klass.length; i++) {
+    if (klass[i] === want) { if (start === null) start = i; }
+    else if (start !== null) { runs.push(segmentFromRun(start, i - 1, last)); start = null; }
   }
-  if (start !== null) close(last);
-  return segments;
+  if (start !== null) runs.push(segmentFromRun(start, last, last));
+  return runs;
+}
+// sloped regions (coloured + gridded)
+function horizonSlopeSegments(points, options = {}) {
+  const { klass, last } = horizonColumnClasses(points, options);
+  if (last < 1) return [];
+  return runsOfClass(klass, "slope", last);
+}
+// flat plateaus, each tagged with a representative skyline y
+function horizonFlatSegments(points, options = {}) {
+  const { klass, last } = horizonColumnClasses(points, options);
+  if (last < 1) return [];
+  return runsOfClass(klass, "flat", last).map(seg => {
+    seg.y = points[Math.floor((seg.startIndex + seg.endIndex) / 2)].y;
+    return seg;
+  });
+}
+// ordered list of coloured regions (flat|slope), used to find flat–flat steps
+function horizonRegions(points, options = {}) {
+  const { klass, last } = horizonColumnClasses(points, options);
+  const regions = [];
+  let start = null, cur = null;
+  for (let i = 0; i <= klass.length; i++) {
+    const k = i < klass.length ? klass[i] : null;
+    const paint = k === "flat" || k === "slope";
+    if (paint && k === cur) continue;
+    if (cur !== null) {
+      const seg = segmentFromRun(start, i - 1, last);
+      seg.type = cur;
+      if (cur === "flat") seg.y = points[Math.floor((start + (i - 1)) / 2)].y;
+      regions.push(seg);
+    }
+    cur = paint ? k : null;
+    if (paint) start = i;
+  }
+  return { regions, last };
+}
+/* Every plateau that sits on the upper (higher) side of a flat–flat 90° step.
+   Two plateaus adjacent in the region list are separated only by a step/gap, so
+   a LOWER flat neighbour (larger screen-y) means this plateau is the taller side
+   of a step. Higher = topmost skyline = smaller screen-y (y grows downward);
+   flip the comparison to pick lower sides instead. Returns ALL such plateaus,
+   not just the global highest. */
+function flatHighlights(regions) {
+  return regions.filter((r, i) => {
+    if (r.type !== "flat") return false;
+    const neighbours = [regions[i - 1], regions[i + 1]].filter(nb => nb && nb.type === "flat");
+    return neighbours.some(nb => nb.y > r.y);       // a lower flat across the step ⇒ r is the higher side
+  });
 }
 function bandColor(i) {
   const hue = (i * 137.508) % 360;                  // golden angle → distinct hues for any count
   return `hsla(${hue.toFixed(2)}, 72%, 55%, 0.4)`;
 }
+const FLAT_HIGHLIGHT_COLOR = "rgba(77, 208, 225, 0.45)";   // solid highlight for the highest plateau
 function clearBands() { lbands.innerHTML = ""; rbands.innerHTML = ""; }
-function renderSlopeBands(segments) {
+function addBand(seg, bg, kind) {                   // kind: "slope" (gridded) | "flat" (solid)
+  for (const hostEl of [lbands, rbands]) {
+    const div = document.createElement("div");
+    div.className = kind;
+    div.style.left = `${seg.startPct}%`;
+    div.style.width = `${seg.endPct - seg.startPct}%`;
+    div.style.backgroundColor = bg;
+    hostEl.appendChild(div);
+  }
+}
+function renderRegions(slopes, highlights) {
   clearBands();
-  segments.forEach((seg, i) => {
-    const color = bandColor(i);
-    for (const hostEl of [lbands, rbands]) {
-      const div = document.createElement("div");
-      div.style.left = `${seg.startPct}%`;
-      div.style.width = `${seg.endPct - seg.startPct}%`;
-      div.style.background = color;
-      hostEl.appendChild(div);
-    }
-  });
-  return segments.length;
+  slopes.forEach((seg, i) => addBand(seg, bandColor(i), "slope"));
+  highlights.forEach(seg => addBand(seg, FLAT_HIGHLIGHT_COLOR, "flat"));
+  return slopes.length + highlights.length;
 }
 
 /* ---- horizon: first filled y (skyline) for every sampled x ---- */
@@ -568,9 +623,11 @@ $("slopeband").onclick = async () => {
   button.disabled = true; button.textContent = "斜率色帶…";
   try {
     const { points } = await horizonSamples();
-    const segments = horizonSlopeSegments(points);
-    const count = renderSlopeBands(segments);
-    if (!count) Swal.fire("整條天際線都是平的(斜率皆為 0),沒有可標記的區段");
+    const { regions } = horizonRegions(points);
+    const slopes = regions.filter(r => r.type === "slope");
+    const highlights = flatHighlights(regions);
+    const count = renderRegions(slopes, highlights);
+    if (!count) Swal.fire("找不到斜率區段或可標示的平台");
   } catch (error) {
     console.error(error);
     Swal.fire("斜率色帶產生失敗");
