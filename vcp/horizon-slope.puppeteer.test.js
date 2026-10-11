@@ -67,9 +67,9 @@ async function main() {
 
     // the LEFT-circle case: a near-vertical step is a discontinuity, never marked.
     assert.deepEqual(segments.cliff, [], "a lone vertical jump is a discontinuity, not a band");
-    assert.deepEqual(segments.cliffBetweenSlopes, [[0, 1], [4, 5]], "a jump splits two slopes and is left unmarked");
+    assert.deepEqual(segments.cliffBetweenSlopes, [[0, 2], [3, 5]], "a step edge splits two slopes, each running right up to the edge");
 
-    assert.deepEqual(segments.gap, [[0, 1], [5, 6]], "a null (no-pixel) gap breaks the run and is unmarked");
+    assert.deepEqual(segments.gap, [[0, 2], [4, 6]], "a null (no-pixel) gap breaks the run");
 
     assert.equal(new Set(segments.colors).size, 3, "each band index gets a distinct colour");
     assert.ok(segments.colors.every(c => c.startsWith("hsla(")), "colours are hsla() strings");
