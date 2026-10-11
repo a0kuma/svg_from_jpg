@@ -75,39 +75,45 @@ async function main() {
     assert.ok(segments.colors.every(c => c.startsWith("hsla(")), "colours are hsla() strings");
 
     // ---- 2. clean geometric SVG: flat → vertical step → diagonal → flat -------
-    // mirrors the reported screenshot: the step must stay unmarked, the diagonal
-    // must be a single band.
+    // the step stays unmarked, the diagonal is one gridded slope band, and the
+    // higher plateau across the flat–flat step gets the solid highlight.
     const stepSlopeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><polygon points="0,200 100,200 100,100 150,100 250,250 300,250 300,400 0,400" fill="#c9c4bd"/></svg>`;
     await page.evaluate(markup => loadSvgText(markup), stepSlopeSvg);
     await page.click("#slopeband");
-    await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
-    const clean = await page.evaluate(() => [...document.querySelectorAll("#lbands > div")]
-      .map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) })));
+    await page.waitForFunction(() => document.querySelector("#lbands > div.slope") !== null);
+    const clean = await page.evaluate(() => {
+      const read = sel => [...document.querySelectorAll(sel)].map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) }));
+      return { slope: read("#lbands > div.slope"), flat: read("#lbands > div.flat") };
+    });
 
-    assert.equal(clean.length, 1, "the diagonal yields exactly one band");
-    const band = clean[0], right = band.left + band.width;
-    assert.ok(band.left > 40 && band.left < 55, "the band starts at the diagonal (~50%), not the flat top");
-    assert.ok(right > 80 && right < 90, "the band ends where the diagonal does (~83%)");
-    assert.ok(!(33 >= band.left && 33 <= right), "the vertical step (~33%) is outside the band — the discontinuity is unmarked");
+    assert.equal(clean.slope.length, 1, "the diagonal yields exactly one slope band");
+    const band = clean.slope[0], right = band.left + band.width;
+    assert.ok(band.left > 40 && band.left < 55, "the slope band starts at the diagonal (~50%), not the flat top");
+    assert.ok(right > 80 && right < 90, "the slope band ends where the diagonal does (~83%)");
+    assert.ok(!(33 >= band.left && 33 <= right), "the vertical step (~33%) is outside the slope band");
+    assert.equal(clean.flat.length, 1, "the taller plateau across the flat–flat step is highlighted");
+    const hl = clean.flat[0], hlRight = hl.left + hl.width;
+    assert.ok(hl.left > 30 && hl.left < 40 && hlRight > 45 && hlRight < 55, "the highlight spans the upper (y=100) plateau, ~33–50%");
 
     // ---- 3. live DOM rendering over the real ex.svg skyline ------------------
     const fixture = await readFile(fixturePath, "utf8");
     await page.evaluate(markup => loadSvgText(markup), fixture);
     await page.click("#slopeband");
-    await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
+    await page.waitForFunction(() => document.querySelector("#lbands > div.slope") !== null);
     const bands = await page.evaluate(() => {
-      const read = host => [...document.querySelectorAll(`#${host} > div`)].map(d => ({
-        left: parseFloat(d.style.left), width: parseFloat(d.style.width), bg: d.style.background
+      const read = sel => [...document.querySelectorAll(sel)].map(d => ({
+        left: parseFloat(d.style.left), width: parseFloat(d.style.width), bg: d.style.backgroundColor
       }));
-      return { left: read("lbands"), right: read("rbands") };
+      return { left: read("#lbands > div.slope"), right: read("#rbands > div.slope"), flat: read("#lbands > div.flat") };
     });
 
-    assert.ok(bands.left.length > 0, "ex.svg's varied skyline produces bands");
+    assert.ok(bands.left.length > 0, "ex.svg's varied skyline produces slope bands");
     assert.ok(bands.left.length < 431, "windowing + discontinuity exclusion beats the naive per-pixel partition");
-    assert.equal(bands.left.length, bands.right.length, "both panels show the same bands");
+    assert.equal(bands.left.length, bands.right.length, "both panels show the same slope bands");
     assert.ok(bands.left.every(b => b.left >= 0 && b.left + b.width <= 100.0001), "bands stay within 0~100%");
     assert.ok(bands.left.every(b => b.width > 0), "every band has a positive width");
-    assert.ok(bands.left.every(b => b.bg.includes("hsla") || /rgba?\(/.test(b.bg)), "every band is painted");
+    assert.ok(bands.left.every(b => /rgba?\(|hsla?\(/.test(b.bg)), "every band is painted");
+    assert.ok(bands.flat.length <= 1, "at most one plateau is highlighted");
     const lefts = bands.left.map(b => b.left);
     assert.deepEqual(lefts, [...lefts].sort((a, b) => a - b), "bands are laid out left→right");
 

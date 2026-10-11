@@ -74,31 +74,50 @@ async function main() {
       tops.forEach(top => { for (let k = 0; k < block; k++) points.push({ x: points.length, y: top }); });
       return horizonSlopeSegments(points, { window: 4, flatEps: 0.1, jumpMax: 6 });
     }, TOPS, BLOCK);
-    assert.deepEqual(staircaseSegments, [], "every vertical step is a discontinuity — 20px and 130px alike — so nothing is marked");
+    assert.deepEqual(staircaseSegments, [], "every vertical step is a discontinuity — 20px and 130px alike — so nothing is sloped");
 
-    // ---- 2. live DOM: the block staircase renders zero bands -----------------
+    // the highlight picks the tallest plateau (top=50), walking up the ascending
+    // flat–flat steps regardless of their heights.
+    const highlight = await page.evaluate((tops, block) => {
+      const points = [];
+      tops.forEach(top => { for (let k = 0; k < block; k++) points.push({ x: points.length, y: top }); });
+      const { regions } = horizonRegions(points, { window: 4, flatEps: 0.1, jumpMax: 6 });
+      const hl = highestFlatHighlight(regions);
+      return hl ? { y: hl.y, startIndex: hl.startIndex } : null;
+    }, TOPS, BLOCK);
+    assert.ok(highlight && highlight.y === 50, "the tallest plateau (top=50) is the highlight");
+    assert.ok(highlight.startIndex >= 250 && highlight.startIndex < 300, "the highlight is the rightmost/top block (cols 250–300)");
+
+    // ---- 2. live DOM: steps give no slope bands, only the tallest plateau -----
     await page.evaluate(markup => loadSvgText(markup), stairSvg);
     await page.click("#slopeband");
-    await page.waitForSelector(".swal2-popup");   // zero-band path finishes by announcing "all flat/steps"
-    const stairBands = await page.evaluate(() => document.querySelector("#lbands").childElementCount);
-    assert.equal(stairBands, 0, "a staircase of five 90° steps produces no bands at all");
-    await page.evaluate(() => Swal.close());
-    await page.waitForFunction(() => !document.querySelector(".swal2-popup"));
+    await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
+    const stair = await page.evaluate(() => ({
+      slope: document.querySelectorAll("#lbands > div.slope").length,
+      flat: [...document.querySelectorAll("#lbands > div.flat")].map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) }))
+    }));
+    assert.equal(stair.slope, 0, "a staircase of five 90° steps produces no slope bands");
+    assert.equal(stair.flat.length, 1, "only the tallest plateau is highlighted");
+    assert.ok(stair.flat[0].left > 80 && stair.flat[0].left < 86, "the highlight sits on the tallest block (~83%)");
 
     // ---- 3. the classifier still marks a real slope -------------------------
     await page.evaluate(markup => loadSvgText(markup), rampSvg);
     await page.click("#slopeband");
-    await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
-    const ramp = await page.evaluate(() => [...document.querySelectorAll("#lbands > div")]
-      .map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) })));
-    const covered = pct => ramp.some(b => pct >= b.left && pct <= b.left + b.width);
+    await page.waitForFunction(() => document.querySelector("#lbands > div.slope") !== null);
+    const ramp = await page.evaluate(() => ({
+      slope: [...document.querySelectorAll("#lbands > div.slope")].map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) })),
+      flat: [...document.querySelectorAll("#lbands > div.flat")].map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) }))
+    }));
+    const covered = (arr, pct) => arr.some(b => pct >= b.left && pct <= b.left + b.width);
 
-    assert.equal(ramp.length, 1, "the lone diagonal yields exactly one band");
-    assert.ok(covered(DIAGONAL_PCT), "the diagonal (40%) IS marked");
-    assert.ok(!covered(RAMP_STEP_PCT), "the vertical step (80%) is NOT marked");
+    assert.equal(ramp.slope.length, 1, "the lone diagonal yields exactly one slope band");
+    assert.ok(covered(ramp.slope, DIAGONAL_PCT), "the diagonal (40%) IS a gridded slope band");
+    assert.ok(!covered(ramp.slope, RAMP_STEP_PCT), "the vertical step (80%) is NOT a slope band");
+    assert.equal(ramp.flat.length, 1, "the taller plateau past the step is highlighted");
+    assert.ok(covered(ramp.flat, 90), "the highlight sits on the top plateau (~80–100%)");
 
     assert.deepEqual(pageErrors, [], "the browser reported no runtime errors");
-    console.log("Horizon slope-band discontinuity test: OK (all steps unmarked regardless of height; diagonal still marked)");
+    console.log("Horizon slope-band discontinuity test: OK (steps unmarked at any height; tallest plateau highlighted; diagonal gridded)");
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));
