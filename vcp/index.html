@@ -35,6 +35,27 @@
       repeating-linear-gradient(to right, rgba(255,255,255,.45) 0 1px, transparent 1px 14px),
       repeating-linear-gradient(to bottom, rgba(255,255,255,.45) 0 1px, transparent 1px 14px);
   }
+  /* numbered bands + hover highlight */
+  .bandnum { position:absolute; top:2px; left:50%; transform:translateX(-50%); min-width:15px; height:15px;
+    padding:0 3px; border-radius:8px; background:rgba(0,0,0,.62); color:#fff; font:9px/15px system-ui;
+    text-align:center; white-space:nowrap; pointer-events:none; }
+  .vbands.dim > div:not(.hl) { opacity:.2; }
+  .vbands > div.hl { outline:2px solid #fff; outline-offset:-1px; filter:brightness(1.5) saturate(1.3); }
+  .vbands > div.hl > .bandnum { background:var(--accent); color:#0b0e12; font-weight:700; }
+  /* right-side legend of the bands */
+  #bandlist { position:absolute; top:40px; right:10px; width:174px; max-height:calc(100% - 58px); z-index:6;
+    background:rgba(15,18,22,.88); border:1px solid var(--line); border-radius:8px; overflow:auto; padding:6px; display:none; }
+  #bandlist.on { display:block; }
+  #bandlist h4 { margin:2px 4px 6px; font-size:11px; color:var(--mut); font-weight:600; }
+  .blrow { display:flex; align-items:center; gap:7px; padding:4px 6px; border-radius:6px; cursor:default; }
+  .blrow:hover { background:rgba(77,208,225,.2); }
+  .blsw { width:20px; height:20px; border-radius:50%; flex:0 0 auto; display:flex; align-items:center;
+    justify-content:center; font:700 11px system-ui; color:#0b0e12; }
+  .blrow .t { font-size:12px; color:var(--fg); }
+  .blrow .r { font-size:11px; color:var(--mut); margin-left:auto; font-variant-numeric:tabular-nums; }
+  #bandpop { position:fixed; z-index:9999; transform:translate(-50%,-100%); pointer-events:none; display:none;
+    background:rgba(15,18,22,.96); border:1px solid var(--accent); color:var(--fg); font:12px system-ui;
+    padding:4px 8px; border-radius:6px; white-space:nowrap; }
   #cv { cursor:crosshair; }
   .side.panning, .side.panning #cv { cursor:grabbing; }
   #right .wrap { background:#0b0e12; box-shadow:inset 0 0 0 1px var(--line); }
@@ -83,9 +104,11 @@
     </div>
   </div>
   <div id="drop">拖放或<b>&nbsp;上傳 SVG&nbsp;</b>開始</div>
+  <div id="bandlist"><h4>色帶（滑過高亮）</h4></div>
 </div>
 
 <div id="flyer"></div>
+<div id="bandpop"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
@@ -100,6 +123,7 @@ const lwrap = $("lwrap"), rwrap = $("rwrap"), host = $("host"), rsvg = $("rsvg")
 const cv = $("cv"), ctx = cv.getContext("2d"), flyer = $("flyer");
 const xpos = $("xpos"), lshade = $("lshade"), rshade = $("rshade");
 const lbands = $("lbands"), rbands = $("rbands");
+const bandList = $("bandlist"), bandPop = $("bandpop");
 
 let lsvg = null;                 // parsed source <svg>
 let vbW = 0, vbH = 0;            // viewBox size (user units)
@@ -242,23 +266,75 @@ function bandColor(i) {
   const hue = (i * 137.508) % 360;                  // golden angle → distinct hues for any count
   return `hsla(${hue.toFixed(2)}, 72%, 55%, 0.4)`;
 }
+function bandSolid(i) { return `hsl(${((i * 137.508) % 360).toFixed(2)}, 72%, 55%)`; }  // opaque, for the legend swatch
 const FLAT_HIGHLIGHT_COLOR = "rgba(77, 208, 225, 0.45)";   // solid highlight for the highest plateau
-function clearBands() { lbands.innerHTML = ""; rbands.innerHTML = ""; }
-function addBand(seg, bg, kind) {                   // kind: "slope" (gridded) | "flat" (solid)
+
+let bandEls = [];                                   // num(1-based) → { divs:[leftDiv,rightDiv], band }
+function clearBands() {
+  lbands.innerHTML = ""; rbands.innerHTML = "";
+  bandList.innerHTML = '<h4>色帶（滑過高亮）</h4>';
+  bandList.classList.remove("on");
+  lbands.classList.remove("dim"); rbands.classList.remove("dim");
+  hideBandPop(); bandEls = [];
+}
+function makeBand(band) {                            // one numbered band div per panel
+  const divs = [];
   for (const hostEl of [lbands, rbands]) {
     const div = document.createElement("div");
-    div.className = kind;
-    div.style.left = `${seg.startPct}%`;
-    div.style.width = `${seg.endPct - seg.startPct}%`;
-    div.style.backgroundColor = bg;
+    div.className = band.kind;
+    div.dataset.num = band.num;
+    div.style.left = `${band.startPct}%`;
+    div.style.width = `${band.endPct - band.startPct}%`;
+    div.style.backgroundColor = band.color;
+    const badge = document.createElement("span");
+    badge.className = "bandnum"; badge.textContent = band.num;
+    div.appendChild(badge);
     hostEl.appendChild(div);
+    divs.push(div);
   }
+  return divs;
 }
+function legendRow(band) {
+  const row = document.createElement("div");
+  row.className = "blrow";
+  const sw = document.createElement("span");
+  sw.className = "blsw"; sw.style.background = band.solid; sw.textContent = band.num;
+  const t = document.createElement("span");
+  t.className = "t"; t.textContent = band.kind === "slope" ? "斜率帶" : "平台峰";
+  const r = document.createElement("span");
+  r.className = "r"; r.textContent = `${band.startPct.toFixed(1)}–${band.endPct.toFixed(1)}%`;
+  row.append(sw, t, r);
+  row.addEventListener("mouseenter", () => highlightBand(band.num, true));
+  row.addEventListener("mouseleave", () => highlightBand(band.num, false));
+  return row;
+}
+function highlightBand(num, on) {
+  const e = bandEls[num - 1]; if (!e) return;
+  lbands.classList.toggle("dim", on); rbands.classList.toggle("dim", on);
+  e.divs.forEach(d => d.classList.toggle("hl", on));
+  if (on) showBandPop(e); else hideBandPop();
+}
+function showBandPop(e) {
+  const r = e.divs[0].getBoundingClientRect(), b = e.band;
+  bandPop.textContent = `#${b.num} · ${b.kind === "slope" ? "斜率帶" : "平台峰"} · ${b.startPct.toFixed(1)}–${b.endPct.toFixed(1)}%`;
+  bandPop.style.display = "block";
+  bandPop.style.left = Math.max(10, Math.min(window.innerWidth - 10, r.left + r.width / 2)) + "px";
+  bandPop.style.top = Math.max(bandPop.offsetHeight + 6, r.top - 4) + "px";
+}
+function hideBandPop() { bandPop.style.display = "none"; }
 function renderRegions(slopes, highlights) {
   clearBands();
-  slopes.forEach((seg, i) => addBand(seg, bandColor(i), "slope"));
-  highlights.forEach(seg => addBand(seg, FLAT_HIGHLIGHT_COLOR, "flat"));
-  return slopes.length + highlights.length;
+  const all = [
+    ...slopes.map((s, i) => ({ ...s, kind: "slope", color: bandColor(i), solid: bandSolid(i) })),
+    ...highlights.map(h => ({ ...h, kind: "flat", color: FLAT_HIGHLIGHT_COLOR, solid: "rgb(77, 208, 225)" })),
+  ].sort((a, b) => a.startPct - b.startPct);
+  all.forEach((band, i) => {
+    band.num = i + 1;
+    bandEls.push({ divs: makeBand(band), band });
+    bandList.appendChild(legendRow(band));
+  });
+  bandList.classList.toggle("on", all.length > 0);
+  return all.length;
 }
 
 /* ---- horizon: first filled y (skyline) for every sampled x ---- */
