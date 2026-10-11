@@ -76,19 +76,18 @@ async function main() {
     }, TOPS, BLOCK);
     assert.deepEqual(staircaseSegments, [], "every vertical step is a discontinuity — 20px and 130px alike — so nothing is sloped");
 
-    // the highlight picks the tallest plateau (top=50), walking up the ascending
-    // flat–flat steps regardless of their heights.
-    const highlight = await page.evaluate((tops, block) => {
+    // every plateau that is the higher side of an ascending flat–flat step is
+    // highlighted (not just the global tallest) — i.e. all blocks except the
+    // single lowest (top=370).
+    const highlights = await page.evaluate((tops, block) => {
       const points = [];
       tops.forEach(top => { for (let k = 0; k < block; k++) points.push({ x: points.length, y: top }); });
       const { regions } = horizonRegions(points, { window: 4, flatEps: 0.1, jumpMax: 6 });
-      const hl = highestFlatHighlight(regions);
-      return hl ? { y: hl.y, startIndex: hl.startIndex } : null;
+      return flatHighlights(regions).map(h => h.y).sort((a, b) => a - b);
     }, TOPS, BLOCK);
-    assert.ok(highlight && highlight.y === 50, "the tallest plateau (top=50) is the highlight");
-    assert.ok(highlight.startIndex >= 250 && highlight.startIndex < 300, "the highlight is the rightmost/top block (cols 250–300)");
+    assert.deepEqual(highlights, [50, 70, 200, 220, 350], "every plateau above the lowest is highlighted, not only the tallest");
 
-    // ---- 2. live DOM: steps give no slope bands, only the tallest plateau -----
+    // ---- 2. live DOM: steps give no slope bands; all-but-lowest plateaus lit --
     await page.evaluate(markup => loadSvgText(markup), stairSvg);
     await page.click("#slopeband");
     await page.waitForFunction(() => document.querySelector("#lbands").childElementCount > 0);
@@ -96,9 +95,11 @@ async function main() {
       slope: document.querySelectorAll("#lbands > div.slope").length,
       flat: [...document.querySelectorAll("#lbands > div.flat")].map(d => ({ left: parseFloat(d.style.left), width: parseFloat(d.style.width) }))
     }));
+    const litStair = pct => stair.flat.some(b => pct >= b.left && pct <= b.left + b.width);
     assert.equal(stair.slope, 0, "a staircase of five 90° steps produces no slope bands");
-    assert.equal(stair.flat.length, 1, "only the tallest plateau is highlighted");
-    assert.ok(stair.flat[0].left > 80 && stair.flat[0].left < 86, "the highlight sits on the tallest block (~83%)");
+    assert.equal(stair.flat.length, 5, "all plateaus except the lowest are highlighted");
+    assert.ok(!litStair((25 / 300) * 100), "the lowest block (~8%) is not highlighted");
+    assert.ok(litStair((275 / 300) * 100), "the tallest block (~92%) is highlighted");
 
     // ---- 3. the classifier still marks a real slope -------------------------
     await page.evaluate(markup => loadSvgText(markup), rampSvg);

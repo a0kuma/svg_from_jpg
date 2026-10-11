@@ -227,19 +227,18 @@ function horizonRegions(points, options = {}) {
   }
   return { regions, last };
 }
-/* The single highest plateau that sits on the upper side of a flat–flat 90°
-   step. Two plateaus adjacent in the region list are separated only by a
-   step/gap, so a LOWER flat neighbour (larger screen-y) means this plateau is
-   the taller side of a step. "Highest" = topmost skyline = smallest screen-y
-   (y grows downward). Flip the comparisons to pick the lowest instead. */
-function highestFlatHighlight(regions) {
-  const candidates = regions.filter((r, i) => {
+/* Every plateau that sits on the upper (higher) side of a flat–flat 90° step.
+   Two plateaus adjacent in the region list are separated only by a step/gap, so
+   a LOWER flat neighbour (larger screen-y) means this plateau is the taller side
+   of a step. Higher = topmost skyline = smaller screen-y (y grows downward);
+   flip the comparison to pick lower sides instead. Returns ALL such plateaus,
+   not just the global highest. */
+function flatHighlights(regions) {
+  return regions.filter((r, i) => {
     if (r.type !== "flat") return false;
     const neighbours = [regions[i - 1], regions[i + 1]].filter(nb => nb && nb.type === "flat");
     return neighbours.some(nb => nb.y > r.y);       // a lower flat across the step ⇒ r is the higher side
   });
-  if (!candidates.length) return null;
-  return candidates.reduce((best, r) => (r.y < best.y ? r : best));
 }
 function bandColor(i) {
   const hue = (i * 137.508) % 360;                  // golden angle → distinct hues for any count
@@ -257,11 +256,11 @@ function addBand(seg, bg, kind) {                   // kind: "slope" (gridded) |
     hostEl.appendChild(div);
   }
 }
-function renderRegions(slopes, highlight) {
+function renderRegions(slopes, highlights) {
   clearBands();
   slopes.forEach((seg, i) => addBand(seg, bandColor(i), "slope"));
-  if (highlight) addBand(highlight, FLAT_HIGHLIGHT_COLOR, "flat");
-  return slopes.length + (highlight ? 1 : 0);
+  highlights.forEach(seg => addBand(seg, FLAT_HIGHLIGHT_COLOR, "flat"));
+  return slopes.length + highlights.length;
 }
 
 /* ---- horizon: first filled y (skyline) for every sampled x ---- */
@@ -626,8 +625,8 @@ $("slopeband").onclick = async () => {
     const { points } = await horizonSamples();
     const { regions } = horizonRegions(points);
     const slopes = regions.filter(r => r.type === "slope");
-    const highlight = highestFlatHighlight(regions);
-    const count = renderRegions(slopes, highlight);
+    const highlights = flatHighlights(regions);
+    const count = renderRegions(slopes, highlights);
     if (!count) Swal.fire("找不到斜率區段或可標示的平台");
   } catch (error) {
     console.error(error);

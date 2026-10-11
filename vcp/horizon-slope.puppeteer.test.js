@@ -113,7 +113,7 @@ async function main() {
     assert.ok(bands.left.every(b => b.left >= 0 && b.left + b.width <= 100.0001), "bands stay within 0~100%");
     assert.ok(bands.left.every(b => b.width > 0), "every band has a positive width");
     assert.ok(bands.left.every(b => /rgba?\(|hsla?\(/.test(b.bg)), "every band is painted");
-    assert.ok(bands.flat.length <= 1, "at most one plateau is highlighted");
+    assert.ok(bands.flat.every(b => b.left >= 0 && b.left + b.width <= 100.0001 && b.width > 0), "plateau highlights are valid bands");
     const lefts = bands.left.map(b => b.left);
     assert.deepEqual(lefts, [...lefts].sort((a, b) => a - b), "bands are laid out left→right");
 
