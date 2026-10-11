@@ -44,7 +44,7 @@ async function main() {
     const segments = await page.evaluate(() => {
       const mk = ys => ys.map((y, i) => ({ x: i, y }));
       const pair = s => s.map(g => [g.startIndex, g.endIndex]);
-      const opts = { window: 1, flatEps: 0.01, steepMax: 10 };
+      const opts = { window: 1, flatEps: 0.01, jumpMax: 10 };
       return {
         flat: horizonSlopeSegments(mk([5, 5, 5, 5, 5]), opts),
         ramp: pair(horizonSlopeSegments(mk([0, 1, 2, 3, 4, 5]), opts)),
