@@ -4,6 +4,7 @@
   },
   "scripts": {
     "test:horizon": "node vcp/horizon.puppeteer.test.js",
-    "test:horizon-slope": "node vcp/horizon-slope.puppeteer.test.js"
+    "test:horizon-slope": "node vcp/horizon-slope.puppeteer.test.js",
+    "test:horizon-slope-steps": "node vcp/horizon-slope-step-heights.puppeteer.test.js"
   }
 }
