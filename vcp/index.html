@@ -133,29 +133,47 @@ function applyShade(startPct, endPct, hex, alpha) {
   }
 }
 
-/* ---- slope bands: cut the horizon skyline into maximal runs where the
-   partial derivative ∂y/∂x ≠ 0 (i.e. the segment is NOT flat), and paint each
-   such run as its own vertical colour band. A flat step (equal skyline y) or a
-   gap (no filled pixel) ends the current run, so the count of bands is 0..N. */
-function horizonSlopeSegments(points) {
-  const last = points.length - 1;
-  const segments = [];
-  let run = null;                                   // start index of the open non-flat run
-  const close = endIndex => {
-    segments.push({
-      startIndex: run, endIndex,
-      startPct: (run / last) * 100, endPct: (endIndex / last) * 100
-    });
-    run = null;
-  };
-  for (let i = 0; i < last; i++) {
-    const a = points[i], b = points[i + 1];
-    const measurable = Number.isFinite(a.y) && Number.isFinite(b.y) && b.x !== a.x;
-    const notFlat = measurable && (b.y - a.y) !== 0;   // ∂y/∂x ≠ 0  ⇒  not slope 0
-    if (notFlat) { if (run === null) run = i; }
-    else if (run !== null) close(i);
+/* ---- slope bands: cut the horizon skyline into maximal runs that are NOT
+   flat, and paint each run as its own vertical colour band. The partition is
+   per-column by a *windowed* slope ∂y/∂x, which matters for two reasons the
+   naive forward difference gets wrong:
+     • a sloped edge rasterises to a staircase (flat tread + 1px step, repeating)
+       — a window spans several treads so the whole diagonal reads as ONE slope
+       instead of fragmenting into many tiny bands;
+     • a near-vertical step is a *discontinuity* (a jump), not a slope — any
+       column whose |slope| exceeds `steepMax` is excluded and left unmarked.
+   So every segment is uniformly flat (unmarked) or uniformly sloped (marked),
+   and the number of marked bands is 0..N. */
+function horizonSlopeSegments(points, options = {}) {
+  const n = points.length, last = n - 1;
+  if (last < 1) return [];
+  const window = Math.max(1, options.window ?? Math.min(20, Math.max(4, Math.round(n * 0.004))));
+  const flatEps = options.flatEps ?? 0.1;           // |slope| ≤ this ⇒ flat (also swallows ±1px raster jitter)
+  const steepMax = options.steepMax ?? 4;           // |slope| > this ⇒ discontinuity (near-vertical jump), never marked
+
+  const slope = new Array(n).fill(null);            // central/windowed slope per column; null where undefined
+  for (let i = 0; i < n; i++) {
+    if (!Number.isFinite(points[i].y)) continue;
+    const a = points[Math.max(0, i - window)], b = points[Math.min(last, i + window)];
+    if (!Number.isFinite(a.y) || !Number.isFinite(b.y) || b.x === a.x) continue;   // a gap breaks the slope
+    slope[i] = (b.y - a.y) / (b.x - a.x);
   }
-  if (run !== null) close(last);
+  const isSloped = i => slope[i] !== null && Math.abs(slope[i]) > flatEps && Math.abs(slope[i]) <= steepMax;
+
+  const segments = [];
+  let start = null;
+  const close = end => {
+    segments.push({
+      startIndex: start, endIndex: end,
+      startPct: (start / last) * 100, endPct: Math.min(100, ((end + 1) / last) * 100)
+    });
+    start = null;
+  };
+  for (let i = 0; i < n; i++) {
+    if (isSloped(i)) { if (start === null) start = i; }
+    else if (start !== null) close(i - 1);
+  }
+  if (start !== null) close(last);
   return segments;
 }
 function bandColor(i) {
