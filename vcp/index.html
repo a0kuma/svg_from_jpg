@@ -268,9 +268,14 @@ function horizonRegions(points, options = {}) {
    screen-y (y grows downward). A plateau that has a higher flat neighbour is not
    the peak at that step, so it is NOT coloured — but every separate peak is, not
    just the single global highest. (Flip both comparisons to pick valleys.) */
-function flatHighlights(regions) {
+function flatHighlights(regions, topEps) {
   return regions.filter((r, i) => {
     if (r.type !== "flat") return false;
+    // A plateau whose skyline reaches the TOP edge of the SVG is always coloured
+    // (e.g. the peak-memory plateau on a memory-timeline plot that touches y=0),
+    // even when it sits between two SLOPES rather than between flat steps — the
+    // flat-neighbour test below would otherwise miss it.
+    if (topEps !== undefined && r.y <= topEps) return true;
     const neighbours = [regions[i - 1], regions[i + 1]].filter(nb => nb && nb.type === "flat");
     const higherThanSome = neighbours.some(nb => nb.y > r.y);   // a lower flat across a step ⇒ r is the higher side here
     const lowerThanSome = neighbours.some(nb => nb.y < r.y);    // a higher flat across a step ⇒ r is NOT the peak
@@ -711,10 +716,11 @@ $("slopeband").onclick = async () => {
   const button = $("slopeband");
   button.disabled = true; button.textContent = "斜率色帶…";
   try {
-    const { points } = await horizonSamples();
+    const { points, box, sampleHeight } = await horizonSamples();
     const { regions } = horizonRegions(points);
     const slopes = regions.filter(r => r.type === "slope");
-    const highlights = flatHighlights(regions);
+    const topEps = box.y + 2.5 * box.height / sampleHeight;   // a plateau within ~2.5 px of the top edge counts as touching it
+    const highlights = flatHighlights(regions, topEps);
     const count = renderRegions(slopes, highlights);
     if (!count) Swal.fire("找不到斜率區段或可標示的平台");
   } catch (error) {
