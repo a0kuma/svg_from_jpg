@@ -80,6 +80,7 @@
   <button class="btn" id="shade">套用垂直色帶</button>
   <button class="btn" id="horizon">Horizon</button>
   <button class="btn" id="slopeband">斜率色帶</button>
+  <input class="btn" id="splitpct" type="number" min="0" max="100" step="0.01" placeholder="FWD｜BWD 分割 %" title="x% 左側(前向)不做斜率偵測" style="width:120px">
   <div class="hint" id="xpos">x: --%</div>
   <span class="sp"></span>
   <span class="hint">左圖點一下 → 該 x 位置上所有色塊(整條垂直帶)複製到右側 · 拖曳平移 · 滾輪縮放(左右同步)</span>
@@ -717,6 +718,13 @@ $("slopeband").onclick = async () => {
   button.disabled = true; button.textContent = "斜率色帶…";
   try {
     const { points, box, sampleHeight } = await horizonSamples();
+    // FWD｜BWD split: ignore everything left of the given x% (the forward pass),
+    // so the slope detection only looks at the backward region.
+    const split = parseFloat($("splitpct").value);
+    if (Number.isFinite(split) && split > 0 && split < 100) {
+      const last = points.length - 1;
+      for (let j = 0; j < points.length; j++) if ((j / last) * 100 < split) points[j].y = null;
+    }
     const { regions } = horizonRegions(points);
     const slopes = regions.filter(r => r.type === "slope");
     const topEps = box.y + 2.5 * box.height / sampleHeight;   // a plateau within ~2.5 px of the top edge counts as touching it
@@ -729,6 +737,13 @@ $("slopeband").onclick = async () => {
   } finally {
     button.disabled = false; button.textContent = "斜率色帶";
   }
+};
+// set the FWD｜BWD split % and (re-)run the slope-band analysis (for embedders)
+window.setSplit = function (pct) {
+  const el = $("splitpct");
+  if (el) el.value = (pct === null || pct === undefined || pct === "") ? "" : pct;
+  if (lbands.childElementCount) clearBands();
+  $("slopeband").click();
 };
 ["dragover", "dragenter"].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); stage.classList.add("dragover"); }));
 ["dragleave", "drop"].forEach(t => stage.addEventListener(t, e => { e.preventDefault(); if (t === "dragleave" && e.target !== stage) return; stage.classList.remove("dragover"); }));
