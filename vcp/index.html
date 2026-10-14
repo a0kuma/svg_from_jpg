@@ -269,17 +269,36 @@ function horizonRegions(points, options = {}) {
    screen-y (y grows downward). A plateau that has a higher flat neighbour is not
    the peak at that step, so it is NOT coloured — but every separate peak is, not
    just the single global highest. (Flip both comparisons to pick valleys.) */
-function flatHighlights(regions, topEps) {
+function flatHighlights(regions, topEps, points) {
+  const eps = 0.75;   // sub-pixel tolerance on the skyline y
   return regions.filter((r, i) => {
     if (r.type !== "flat") return false;
     // A plateau whose skyline reaches the TOP edge of the SVG is always coloured
-    // (e.g. the peak-memory plateau on a memory-timeline plot that touches y=0),
-    // even when it sits between two SLOPES rather than between flat steps — the
-    // flat-neighbour test below would otherwise miss it.
+    // (e.g. the peak-memory plateau on a memory-timeline plot that touches y=0).
     if (topEps !== undefined && r.y <= topEps) return true;
+    // Preferred test (needs the skyline points): a plateau is a peak iff it is a
+    // LOCAL MAXIMUM in x — scanning outward from each end, the first clearly
+    // different level is LOWER (larger screen-y, since y grows downward). This
+    // catches plateaus flanked by SLOPES (ramps), not just by flat 90° steps, so
+    // every held hump on a memory-timeline plot is found; a rising "shelf" (a
+    // higher level immediately to one side) is correctly rejected. A run that
+    // reaches the plot edge or a masked (null) sample counts as lower there.
+    if (points && Number.isFinite(r.startIndex) && Number.isFinite(r.endIndex)) {
+      const side = (idx, step) => {
+        for (let k = idx; k >= 0 && k < points.length; k += step) {
+          const y = points[k].y;
+          if (!Number.isFinite(y)) return +1;        // masked / off-plot ⇒ lower
+          if (y > r.y + eps) return +1;              // lower memory on this side
+          if (y < r.y - eps) return -1;              // higher memory exists ⇒ not a peak
+        }
+        return +1;                                   // reached the plot edge ⇒ lower
+      };
+      return side(r.startIndex - 1, -1) > 0 && side(r.endIndex + 1, +1) > 0;
+    }
+    // Fallback (no points given): the original flat-neighbour local-max test.
     const neighbours = [regions[i - 1], regions[i + 1]].filter(nb => nb && nb.type === "flat");
-    const higherThanSome = neighbours.some(nb => nb.y > r.y);   // a lower flat across a step ⇒ r is the higher side here
-    const lowerThanSome = neighbours.some(nb => nb.y < r.y);    // a higher flat across a step ⇒ r is NOT the peak
+    const higherThanSome = neighbours.some(nb => nb.y > r.y);
+    const lowerThanSome = neighbours.some(nb => nb.y < r.y);
     return higherThanSome && !lowerThanSome;
   });
 }
@@ -728,7 +747,7 @@ $("slopeband").onclick = async () => {
     const { regions } = horizonRegions(points);
     const slopes = regions.filter(r => r.type === "slope");
     const topEps = box.y + 2.5 * box.height / sampleHeight;   // a plateau within ~2.5 px of the top edge counts as touching it
-    const highlights = flatHighlights(regions, topEps);
+    const highlights = flatHighlights(regions, topEps, points);
     const count = renderRegions(slopes, highlights);
     if (!count) Swal.fire("找不到斜率區段或可標示的平台");
   } catch (error) {
